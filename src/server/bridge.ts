@@ -8,9 +8,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { BridgeRunResult, DeviceEnv, DeviceStatus, EnvProbe, ParsedDeviceFile } from '../contracts/app';
 import { pathCandidates, runCommand } from './media';
 import { nowIso, readSetting } from './sql';
-
-const SDK_CLI = 'macos_verify_cli.py';
-const SDK_CORE = 'ble_core.py';
+import { SDK_ACTION_SCRIPT } from './sdk-script';
 
 /** Floatboat 自带工具与 node 位于同级 resources 目录，优先复用。 */
 function bundledTool(relative: string[]): string {
@@ -27,16 +25,6 @@ export function pythonCandidates(configured: string): string[] {
 
 export function ffmpegCandidates(configured: string): string[] {
   return dedupe([configured, bundledTool(['ffmpeg', 'bin', 'ffmpeg.exe']), ...pathCandidates('ffmpeg'), 'ffmpeg']);
-}
-
-export function sdkCandidates(configured: string): string[] {
-  const home = os.homedir();
-  return dedupe([
-    configured,
-    path.join(home, 'Documents', '录音笔', 'sdk', 'memotalk-ble-skill'),
-    path.join(home, 'Documents', '录音笔', 'memotalk-ble-skill'),
-    path.join(home, 'Documents', 'sdk', 'memotalk-ble-skill'),
-  ]);
 }
 
 export async function resolveFfmpeg(db: DatabaseSync): Promise<string | null> {
@@ -165,24 +153,23 @@ export async function probeBleak(pythonCommand: string | null): Promise<EnvProbe
   return { ok: false, detail: hint.slice(0, 300), resolvedPath: null };
 }
 
-export function probeSdk(configured: string): { probe: EnvProbe; root: string | null } {
-  for (const candidate of sdkCandidates(configured)) {
-    if (!existsSync(candidate)) continue;
-    if (existsSync(path.join(candidate, 'scripts', SDK_CORE)) && existsSync(path.join(candidate, 'scripts', SDK_CLI))) {
-      return { probe: { ok: true, detail: `已找到 SDK：${candidate}`, resolvedPath: candidate }, root: candidate };
-    }
-    // 也接受直接指向 scripts 目录的配置
-    if (existsSync(path.join(candidate, SDK_CORE))) {
-      return { probe: { ok: true, detail: `已找到 SDK：${path.dirname(candidate)}`, resolvedPath: path.dirname(candidate) }, root: path.dirname(candidate) };
-    }
-  }
-  return { probe: { ok: false, detail: '未找到 memotalk-ble-skill（需要 scripts/ble_core.py）', resolvedPath: null }, root: null };
+export async function probeSdk(pythonCommand: string | null): Promise<EnvProbe> {
+  if (!pythonCommand) return { ok: false, detail: '需要先有可用的 Python 才能检查 memotalk-sdk', resolvedPath: null };
+  const outcome = await runCommand(
+    pythonCommand,
+    ['-c', 'from memotalk import MemoTalkClient; from importlib.metadata import version; print("memotalk-sdk " + version("memotalk-sdk"))'],
+    25000,
+    await pythonEnvFor(pythonCommand),
+  );
+  return outcome.ok
+    ? { ok: true, detail: `${outcome.stdout.trim()} 可导入`, resolvedPath: pythonCommand }
+    : { ok: false, detail: `当前 Python 无法导入 memotalk-sdk：${outcome.stderr.trim().slice(-300)}`, resolvedPath: null };
 }
 
 export async function probeEnvironment(db: DatabaseSync): Promise<DeviceEnv> {
   const { probe: python, command } = await probePython(readSetting(db, 'python_path'));
   const bleak = await probeBleak(command);
-  const { probe: sdk } = probeSdk(readSetting(db, 'sdk_dir'));
+  const sdk = await probeSdk(command);
   const ffmpegPath = await resolveFfmpeg(db);
   const ffmpeg: EnvProbe = ffmpegPath
     ? { ok: true, detail: ffmpegPath, resolvedPath: ffmpegPath }
@@ -252,18 +239,12 @@ export async function runSdkAction(
 ): Promise<BridgeOutcome> {
   const env = await probeEnvironment(db);
   const pythonCommand = env.python.resolvedPath;
-  const sdkRoot = probeSdk(readSetting(db, 'sdk_dir')).root;
-  const commandLabel =
-    action === 'download'
-      ? `python ${SDK_CLI} --action ble-download --file ${options.file ?? ''} --out-dir ${options.outDir ?? ''}`
-      : `python ${SDK_CLI} --action ${action}`;
+  const commandLabel = `MemoTalkClient: ${action}${action === 'download' ? ` (${options.file ?? ''} -> ${options.outDir ?? ''})` : ''}`;
 
-  if (!pythonCommand || !sdkRoot || !env.bleak.ok) {
+  if (!pythonCommand || !env.sdk.ok || !env.bleak.ok) {
     const message = !pythonCommand
       ? '缺少可用的 Python 解释器，无法调用 SDK。'
-      : !sdkRoot
-        ? '没有找到 memotalk-ble-skill SDK 目录，请先在设置中填写 SDK 路径。'
-        : `Python 缺少 bleak 依赖，BLE 无法连接。请在终端执行：${pythonCommand} -m pip install bleak`;
+      : `当前 Python 的 memotalk-sdk 或 bleak 依赖不可用。请执行：uv pip install --python "${pythonCommand}" memotalk-sdk`;
     return {
       result: {
         ok: false,
@@ -280,12 +261,11 @@ export async function runSdkAction(
     };
   }
 
-  const scriptsDir = path.join(sdkRoot, 'scripts');
   const pythonEnv = await pythonEnvFor(pythonCommand);
   const callArgs =
     action === 'download'
-      ? [path.join(scriptsDir, SDK_CLI), '--action', 'ble-download', '--file', options.file ?? '', '--out-dir', options.outDir ?? scriptsDir]
-      : [path.join(scriptsDir, SDK_CLI), '--action', action];
+      ? ['-X', 'utf8', '-c', SDK_ACTION_SCRIPT, '--action', action, '--file', options.file ?? '', '--out-dir', options.outDir ?? '']
+      : ['-X', 'utf8', '-c', SDK_ACTION_SCRIPT, '--action', action];
 
   sdkBusy = true;
   const outcome = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
@@ -293,7 +273,6 @@ export async function runSdkAction(
     let stderr = '';
     let settled = false;
     const child = spawn(pythonCommand, callArgs, {
-      cwd: scriptsDir,
       windowsHide: true,
       ...(pythonEnv ? { env: pythonEnv } : {}),
     });
@@ -329,7 +308,7 @@ export async function runSdkAction(
   const parsedStatus = parseStatus(outcome.stdout);
   const crashed = /ModuleNotFoundError|Traceback/.test(`${outcome.stdout}${outcome.stderr}`);
   const ok = outcome.code === 0 && !crashed;
-  const hint = sdkFailureHint(outcome.stdout);
+  const hint = sdkFailureHint(`${outcome.stdout}\n${outcome.stderr}`);
   const message = crashed
     ? 'SDK 运行失败，请检查 Python 依赖（bleak）与设备连接状态。'
     : ok

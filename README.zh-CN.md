@@ -35,7 +35,7 @@
 - ASR 与 LLM 通过 Host 能力调用，本仓库不包含、也不需要任何模型密钥。
 
 ```bash
-pnpm install          # 安装 UI 依赖与开发用类型定义
+pnpm install          # 安装 UI 依赖、类型定义和测试工具
 ```
 
 之后由 Floatboat 执行 `check_workbench_project` 完成类型检查与构建，`workbench_runtime open` 应用更新。这些是 Host 操作，不是 package scripts。

@@ -33,7 +33,7 @@
 
 - **Host ASR**：把本机音频解码后流式送出，只保存文本与分段，不上传音频原件。
 - **Host LLM**：只发送转写文本与分类说明，返回结构化 JSON Schema 校验后的对象。
-- **本机进程**：`ffmpeg` 用于解码/探测；`python` 仅以固定参数运行 SDK 的 `macos_verify_cli.py`（`--action status|list|ble-download`），不接受用户拼接的任意命令。
+- **本机进程**：`ffmpeg` 用于解码/探测；`python` 以固定脚本和参数调用 PyPI `memotalk-sdk` 的 `MemoTalkClient`（状态、清单、下载及实时流），不接受用户拼接的任意命令，也不加载 SDK 源码目录。
 - 所有外部写操作先落状态再执行，失败保留 `last_error` 与 `job_runs` 记录。
 
 ## 可执行验证

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node --enable-source-maps dist/server/index.mjs",
-    "test": "node --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts"
   },
   "engines": { "node": ">=22.16.0" },
   "dependencies": {
@@ -16,6 +16,7 @@
   "devDependencies": {
     "@types/node": "22.20.2",
     "@types/react": "19.2.8",
-    "@types/react-dom": "19.2.3"
+    "@types/react-dom": "19.2.3",
+    "tsx": "^4.23.15"
   }
 }

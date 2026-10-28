@@ -1,4 +1,4 @@
-// ABOUTME: 设备接入页：环境自检、SDK 路径配置、设备清单拉取与导入目录扫描。
+// ABOUTME: 设备接入页：环境自检、设备清单拉取与导入目录扫描。
 
 import { useState } from 'react';
 import { Copy, FolderPlus, HardDriveDownload, ListTree, PlugZap, RefreshCw, ScanLine, TerminalSquare } from 'lucide-react';
@@ -67,15 +67,12 @@ export function DevicePage({ onNavigate }: Props) {
   const pendingList = useAsyncData<RecordingListResult>(() => api.get<RecordingListResult>('/api/recordings?limit=100'), 'device-pending');
   const [scan, setScan] = useState<IngestScanResult | null>(null);
   const [importDir, setImportDir] = useState<string | null>(null);
-  const [sdkDir, setSdkDir] = useState<string | null>(null);
 
   if (state.loading && !state.data) return <Loading label="正在检测本机环境" />;
   if (state.error) return <ErrorState message={state.error} onRetry={state.reload} />;
   const data = state.data;
   if (!data) return <Loading />;
 
-  const settings = new Map(data.settings.map((item) => [item.key, item.value]));
-  const effectiveSdkDir = sdkDir ?? (settings.get('sdk_dir') || data.env.sdk.resolvedPath || '');
   const importState = directory.data;
   // 目录由服务端解析：设置值优先，空值或失效的临时目录回落到默认收件目录。
   const effectiveImport = importDir ?? importState?.directory ?? '';
@@ -97,7 +94,7 @@ export function DevicePage({ onNavigate }: Props) {
     setBusy('save');
     try {
       await api.patch('/api/settings', {
-        values: { sdk_dir: effectiveSdkDir, import_dir: effectiveImport },
+        values: { import_dir: effectiveImport },
       });
       toast.push('路径设置已保存', 'success');
       state.reload();
@@ -281,24 +278,21 @@ export function DevicePage({ onNavigate }: Props) {
           <ul className="env">
             <EnvRow label="Python" probe={data.env.python} />
             <EnvRow label="bleak 依赖" probe={data.env.bleak} />
-            <EnvRow label="SDK 目录" probe={data.env.sdk} />
+            <EnvRow label="memotalk-sdk" probe={data.env.sdk} />
             <EnvRow label="ffmpeg" probe={data.env.ffmpeg} />
             {data.capabilities.map((item) => (
               <EnvRow key={item.domain} label={item.domain} probe={item} />
             ))}
           </ul>
-          {!data.env.bleak.ok ? (
+          {!data.env.sdk.ok || !data.env.bleak.ok ? (
             <p className="notice">
-              BLE 通道需要 Python 依赖 bleak。在终端执行 <code>{data.env.python.resolvedPath ?? 'python'} -m pip install bleak</code>
+              BLE 通道需要 memotalk-sdk。在终端执行 <code>uv pip install --python "{data.env.python.resolvedPath ?? 'python'}" memotalk-sdk</code>
               后重新检测；未安装时仍可使用「目录导入」与「手动登记清单」。
             </p>
           ) : null}
         </Card>
 
         <Card title="路径设置">
-          <Field label="SDK 目录" hint="memotalk-ble-skill 的根目录，需包含 scripts/ble_core.py">
-            <input value={effectiveSdkDir} onChange={(event) => setSdkDir(event.target.value)} placeholder="C:\\path\\to\\memotalk-ble-skill" />
-          </Field>
           <Field label="导入目录" hint="录音笔文件下载到这个目录后，扫描即可入库；留空时使用默认收件目录">
             <input value={effectiveImport} onChange={(event) => setImportDir(event.target.value)} placeholder="C:\\Users\\me\\memo\\memotalk\\inbox" />
           </Field>

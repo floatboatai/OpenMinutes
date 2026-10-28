@@ -12,7 +12,7 @@ import asyncio
 import json
 import sys
 import threading
-import time
+from contextlib import suppress
 
 
 def log(event, **fields):
@@ -25,28 +25,12 @@ def log(event, **fields):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sdk", required=True, help="memotalk-ble-skill/scripts 目录")
     parser.add_argument("--no-record", action="store_true", help="不自动开始录音，只订阅已有录音流")
     parser.add_argument("--scan-timeout", type=float, default=12.0, help="扫描等待秒数，期间按键唤醒也能连上")
     args = parser.parse_args()
 
-    sys.path.insert(0, args.sdk)
     try:
-        from bleak import BleakClient
-        from ble_core import (
-            UUID_CHAR_FFF1_WRITE,
-            UUID_CHAR_FFF2_NOTIFY,
-            UUID_CHAR_FFE1_WRITE,
-            UUID_CHAR_FFE2_NOTIFY,
-            REC_START,
-            REC_STOP,
-            cmd_control_recording,
-            cmd_read_battery,
-            cmd_set_realtime_asr,
-            cmd_sync_rtc_time,
-            find_or_retrieve_device,
-            parse_ffe2_realtime_packet,
-        )
+        from memotalk import MemoTalkClient
     except Exception as error:  # noqa: BLE001
         log("error", stage="import", message="%s: %s" % (type(error).__name__, error))
         return 3
@@ -70,82 +54,60 @@ def main():
         stop = loop_holder["stop"]
         threading.Thread(target=watch_stdin, daemon=True).start()
 
-        device = await find_or_retrieve_device(timeout=max(3.0, args.scan_timeout))
-        if not device:
-            log("error", stage="scan", message="未发现外设，请按一下录音笔物理键唤醒后重试")
-            return 2
-
-        log("found", name=device.name or "", address=device.address)
         out = sys.stdout.buffer
         total = 0
-        pcm_unknown = 0
 
         try:
-            async with BleakClient(device, timeout=15.0) as client:
+            async with MemoTalkClient(scan_timeout=max(3.0, args.scan_timeout)) as dev:
                 log("connected")
-                frames = asyncio.Queue()
-
-                def on_ffe2(_sender, data):
-                    frames.put_nowait(bytes(data))
-
-                await client.start_notify(UUID_CHAR_FFE2_NOTIFY, on_ffe2)
-                await client.start_notify(UUID_CHAR_FFF2_NOTIFY, lambda _s, _d: None)
-                await client.write_gatt_char(UUID_CHAR_FFF1_WRITE, cmd_sync_rtc_time(), response=False)
-                await asyncio.sleep(0.35)
-                await client.write_gatt_char(UUID_CHAR_FFF1_WRITE, cmd_set_realtime_asr(True), response=False)
-                await asyncio.sleep(0.25)
-
-                if not args.no_record:
-                    await client.write_gatt_char(
-                        UUID_CHAR_FFE1_WRITE, cmd_control_recording(REC_START), response=False
-                    )
-                    log("recording", state="started")
-
-                log("streaming")
-                last_keepalive = time.time()
-
-                while not stop.is_set():
-                    try:
-                        packet = await asyncio.wait_for(frames.get(), timeout=0.5)
-                    except asyncio.TimeoutError:
-                        packet = None
-
-                    if packet is not None:
-                        kind, value = parse_ffe2_realtime_packet(packet)
-                        if kind == "realtime_audio" and isinstance(value, (bytes, bytearray)):
-                            chunk = bytes(value)
+                target = dev.transport.target
+                log("found", name=getattr(target, "name", "") or "", address=getattr(target, "address", ""))
+                pump = None
+                states = None
+                waiter = None
+                recording = False
+                try:
+                    async def pump_audio():
+                        nonlocal total
+                        async for chunk in dev.stream.audio():
                             out.write(chunk)
                             out.flush()
                             total += len(chunk)
-                        elif kind == "unknown":
-                            pcm_unknown += 1
-                        elif kind == "record_state" and isinstance(value, dict):
-                            log("record_state", state=value.get("state"), filename=value.get("filename"))
 
-                    if time.time() - last_keepalive > 25:
-                        last_keepalive = time.time()
-                        try:
-                            await client.write_gatt_char(
-                                UUID_CHAR_FFF1_WRITE, cmd_read_battery(), response=False
-                            )
-                        except Exception:
-                            pass
+                    async def pump_states():
+                        async for state in dev.stream.states():
+                            log("record_state", state=state.state.value, filename=state.filename)
 
-                if not args.no_record:
+                    pump = asyncio.create_task(pump_audio())
+                    states = asyncio.create_task(pump_states())
+                    # Let both SDK iterators subscribe before the device starts sending.
+                    await asyncio.sleep(0)
+                    if not await dev.record.set_realtime(True):
+                        raise RuntimeError("device rejected realtime audio mode")
+                    if not args.no_record:
+                        await dev.record.start()
+                        recording = True
+                        log("recording", state="started")
+
+                    waiter = asyncio.create_task(stop.wait())
+                    log("streaming")
+                    done, _ = await asyncio.wait([pump, states, waiter], return_when=asyncio.FIRST_COMPLETED)
+                    for task in (pump, states):
+                        if task in done:
+                            await task
+                finally:
+                    for task in (pump, states, waiter):
+                        if task is not None:
+                            task.cancel()
+                            with suppress(asyncio.CancelledError, Exception):
+                                await task
                     try:
-                        await client.write_gatt_char(
-                            UUID_CHAR_FFE1_WRITE, cmd_control_recording(REC_STOP), response=False
-                        )
-                        await asyncio.sleep(0.4)
-                    except Exception:
-                        pass
-                try:
-                    await client.write_gatt_char(
-                        UUID_CHAR_FFF1_WRITE, cmd_set_realtime_asr(False), response=False
-                    )
-                except Exception:
-                    pass
-                log("stopped", audio_bytes=total, unknown_packets=pcm_unknown)
+                        if recording:
+                            await dev.record.stop()
+                    finally:
+                        if not await dev.record.set_realtime(False):
+                            raise RuntimeError("device rejected disabling realtime audio mode")
+                log("stopped", audio_bytes=total)
             return 0
         except Exception as error:  # noqa: BLE001
             log("error", stage="stream", message="%s: %s" % (type(error).__name__, error))

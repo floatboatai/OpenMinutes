@@ -6,7 +6,7 @@ import { asObject } from '../../contracts/input';
 import { api } from '../http';
 import { readSettings, writeSetting } from '../sql';
 
-const PATH_KEYS = new Set(['import_dir', 'python_path', 'ffmpeg_path', 'sdk_dir', 'library_dir']);
+const PATH_KEYS = new Set(['import_dir', 'python_path', 'ffmpeg_path', 'library_dir']);
 const FLAG_KEYS = new Set(['auto_analyze', 'speaker_diarization', 'auto_transcribe', 'auto_connect', 'auto_pull']);
 const TEXT_KEYS: Record<string, number> = { asr_hotwords: 300, device_serial: 64, asr_language: 20 };
 const NUMBER_KEYS: Record<string, [number, number]> = { auto_connect_minutes: [1, 120] };
@@ -55,9 +55,11 @@ export function registerSettingRoutes(app: WorkbenchServer): void {
       const values = asObject(body.values);
       const normalized: Array<[string, string]> = [];
       for (const [key, raw] of Object.entries(values)) {
+        // 旧页面可能仍提交此键；忽略它，不恢复已移除的设置。
+        if (key === 'sdk_dir') continue;
         normalized.push([key, normalize(key, raw)]);
       }
-      if (normalized.length === 0) throw Object.assign(new Error('没有需要保存的设置'), { code: 'EMPTY' });
+      if (Object.keys(values).length === 0) throw Object.assign(new Error('没有需要保存的设置'), { code: 'EMPTY' });
       for (const [key, value] of normalized) writeSetting(context.database, key, value);
       return entries(app);
     }),
