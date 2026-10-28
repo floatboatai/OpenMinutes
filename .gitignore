@@ -1,0 +1,20 @@
+# 依赖与构建产物（Host 生成）
+node_modules/
+dist/
+.workbench/
+
+# 本地数据库
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# 数据资源（音频原件、回收站、日志）
+data/
+
+# 本地环境与杂项
+.env
+.env.*
+*.log
+.pytest_cache/
+.DS_Store
+Thumbs.db

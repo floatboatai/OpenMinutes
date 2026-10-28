@@ -1,0 +1,7 @@
+{
+  "name": "@floatboat/workbench-sdk",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22.16.0" }
+}

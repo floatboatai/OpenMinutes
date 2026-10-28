@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "appId": "workbench.3bb3830b-7197-49f8-bd8a-7a9d72b47871",
+  "name": "录音笔工作台",
+  "description": "MemoTalk S1 录音笔的录音资产管理中枢：导入或拉取录音后完成转录、AI 归类与检索复盘。",
+  "registryName": "memo-recorder-workbench",
+  "version": "0.1.0",
+  "sdkVersion": "1.0.0",
+  "runtime": "node22-sqlite-v1",
+  "build": {
+    "profile": "typescript-react-v1",
+    "server": "src/server/index.ts",
+    "ui": "index.html"
+  },
+  "server": "dist/server/index.mjs",
+  "ui": "dist/ui",
+  "migrations": "migrations",
+  "capabilities": ["llm", "asr"],
+  "contributions": [],
+  "dependencies": [],
+  "resources": [
+    {
+      "id": "audio",
+      "kind": "directory",
+      "role": "data",
+      "location": "data",
+      "path": "audio",
+      "access": "read-write",
+      "required": true
+    }
+  ]
+}
