@@ -1,4 +1,4 @@
-// ABOUTME: SDK 指令库表格，只读展示 memotalk-ble-skill 的协议指令。
+// ABOUTME: SDK 指令库表格，只读展示 memotalk-sdk 的协议指令。
 
 import { Activity } from 'lucide-react';
 import type { SdkCommand } from '../../contracts/app';
@@ -6,7 +6,7 @@ import { Card, Empty } from './ui';
 
 export function SdkCommandTable({ commands }: { commands: SdkCommand[] }) {
   return (
-    <Card title="SDK 指令库" action={<span className="muted">{commands.length} 条 · 来自 memotalk-ble-skill</span>}>
+    <Card title="SDK 指令库" action={<span className="muted">{commands.length} 条 · 来自 memotalk-sdk</span>}>
       {commands.length === 0 ? (
         <Empty title="没有指令数据" />
       ) : (

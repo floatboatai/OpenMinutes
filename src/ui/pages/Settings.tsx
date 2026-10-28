@@ -17,7 +17,6 @@ const TEXT_FIELDS: Array<{ key: string; label: string; hint: string; placeholder
   { key: 'import_dir', label: '导入目录', hint: '扫描导入时读取的本地目录', placeholder: '~/Downloads' },
   { key: 'python_path', label: 'Python 解释器', hint: '留空时自动使用 Floatboat 内置 Python', placeholder: 'python' },
   { key: 'ffmpeg_path', label: 'ffmpeg 路径', hint: '留空时使用 Floatboat 内置 ffmpeg；转录依赖它解码音频', placeholder: 'ffmpeg' },
-  { key: 'sdk_dir', label: 'SDK 目录', hint: 'memotalk-ble-skill 根目录', placeholder: '~/Documents/录音笔/sdk/memotalk-ble-skill' },
 ];
 
 const FLAG_FIELDS: Array<{ key: string; label: string; hint: string }> = [

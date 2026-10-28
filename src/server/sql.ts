@@ -73,6 +73,7 @@ export function todayIso(): string {
 export function readSettings(db: DatabaseSync): Map<string, string> {
   const map = new Map<string, string>();
   for (const item of rows(db, 'SELECT key, value FROM settings ORDER BY key')) {
+    if (item.key === 'sdk_dir') continue;
     map.set(strOr(item.key, ''), strOr(item.value, ''));
   }
   return map;

@@ -135,8 +135,8 @@ export async function startLive(app: WorkbenchServer): Promise<LiveState> {
   const db = app.database;
   const { command: pythonCommand } = await probePython(readSetting(db, 'python_path'));
   if (!pythonCommand) throw new LiveError('NO_PYTHON', '未找到 Python 解释器，无法启动采集脚本');
-  const sdkRoot = probeSdk(readSetting(db, 'sdk_dir')).root;
-  if (!sdkRoot) throw new LiveError('NO_SDK', '未找到 memotalk-ble-skill，无法启动采集脚本');
+  const sdk = await probeSdk(pythonCommand);
+  if (!sdk.ok) throw new LiveError('NO_SDK', sdk.detail);
   const ffmpegPath = await resolveFfmpeg(db);
   if (!ffmpegPath) throw new LiveError('NO_FFMPEG', '未找到 ffmpeg，无法解码音频流');
 
@@ -176,7 +176,7 @@ export async function startLive(app: WorkbenchServer): Promise<LiveState> {
 
   try {
     const env = await pythonRuntimeEnv(pythonCommand);
-    const python = spawn(pythonCommand, [script, '--sdk', path.join(sdkRoot, 'scripts'), '--scan-timeout', '12'], {
+    const python = spawn(pythonCommand, ['-X', 'utf8', script, '--scan-timeout', '12'], {
       windowsHide: true,
       ...(env ? { env } : {}),
     });

@@ -35,7 +35,7 @@ The app runs in the **Floatboat desktop Workbench runtime**. It is a workbench p
 - ASR and LLM calls use Host capabilities. This repository neither contains nor requires model API keys.
 
 ```bash
-pnpm install          # Install UI dependencies and development type definitions
+pnpm install          # Install UI dependencies, type definitions, and test tooling
 ```
 
 Then use Floatboat's `check_workbench_project` to run type checks and build the app, and `workbench_runtime open` to apply the update. These are Host operations, not package scripts.
