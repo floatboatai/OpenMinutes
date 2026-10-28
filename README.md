@@ -1,10 +1,10 @@
-# MemoTalk Workbench · 录音笔工作台
+# OpenMinutes · 录音笔工作台
 
 > 把 MemoTalk S1 录音笔里堆着的 MP3，变成可搜索、可分类、可复盘的文本资产。
 
-`memotalk-workbench` 是 [Floatboat](https://floatboat.ai) 工作台应用的一份完整开源实现，配套硬件客户端 [`memotalk-sdk`](https://github.com/floatboatai/memotalk-sdk) 使用。
+`OpenMinutes`（原名 `memotalk-workbench`）是 [Floatboat](https://floatboat.ai) 工作台应用的一份完整开源实现，配套硬件客户端 [`memotalk-sdk`](https://github.com/floatboatai/memotalk-sdk) 使用。
 
-An open-source **Floatboat Workbench** app that turns MemoTalk S1 voice-recorder MP3s into searchable, AI-classified text assets: import → transcribe → classify → review.
+**OpenMinutes** is an open-source **Floatboat Workbench** app that turns MemoTalk S1 voice-recorder MP3s into searchable, AI-classified text assets: import → transcribe → classify → review.
 
 ---
 
