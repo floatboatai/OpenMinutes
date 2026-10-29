@@ -82,22 +82,24 @@ export async function uvPythonCandidates(context = toolContext()): Promise<strin
   return [];
 }
 
-export async function userSiteDir(python: string | null): Promise<string | null> {
+export function pythonTextEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
+}
+
+export async function userSiteDir(python: string | null, env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
   if (!python) return null;
   const result = await runCommand(python, ['-c',
     'import site,sys;sys.stdout.write(site.getusersitepackages() if sys.prefix == sys.base_prefix else "")',
-  ], 12000);
+  ], 12000, pythonTextEnv(env));
   const directory = result.ok ? result.stdout.trim() : '';
   return directory && existsSync(directory) ? directory : null;
 }
 
-export async function pythonRuntimeEnv(python: string | null): Promise<NodeJS.ProcessEnv> {
-  const site = await userSiteDir(python);
+export async function pythonRuntimeEnv(python: string | null, env: NodeJS.ProcessEnv = process.env): Promise<NodeJS.ProcessEnv> {
+  const site = await userSiteDir(python, env);
   return {
-    ...process.env,
-    PYTHONUTF8: '1',
-    PYTHONIOENCODING: 'utf-8',
-    ...(site ? { PYTHONPATH: [site, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) } : {}),
+    ...pythonTextEnv(env),
+    ...(site ? { PYTHONPATH: [site, env.PYTHONPATH].filter(Boolean).join(path.delimiter) } : {}),
   };
 }
 
@@ -109,13 +111,13 @@ export async function findFfmpeg(configured: string): Promise<string | null> {
   return null;
 }
 
-export async function probePython(configured: string): Promise<{ probe: EnvProbe; command: string | null }> {
+export async function probePython(configured: string, env: NodeJS.ProcessEnv = process.env): Promise<{ probe: EnvProbe; command: string | null }> {
   const managed = await uvPythonCandidates();
   const candidates = [...new Set([...pythonCandidates(configured), ...managed].filter(Boolean))];
   for (const candidate of candidates) {
     const outcome = await runCommand(candidate, ['-c',
       'import sys;print(sys.executable);print("Python "+sys.version.split()[0]);sys.exit(0 if sys.version_info >= (3,10) else 1)',
-    ], 8000);
+    ], 8000, pythonTextEnv(env));
     if (outcome.ok) {
       const [executable, version] = outcome.stdout.trim().split(/\r?\n/);
       if (!executable) continue;
