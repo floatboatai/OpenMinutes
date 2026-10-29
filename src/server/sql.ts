@@ -120,6 +120,40 @@ export function finishJob(
   ]);
 }
 
+export const INTERRUPTED_TASK_MESSAGE = '上次处理因服务重启中断，可重新开始';
+
+export interface RecoveryResult {
+  recordings: number;
+  jobs: number;
+}
+
+/** 将进程退出时遗留的持久化任务恢复为可重试状态。 */
+export function recoverInterruptedTasks(db: DatabaseSync): RecoveryResult {
+  const timestamp = nowIso();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const recordings = run(
+      db,
+      `UPDATE recordings
+          SET status = 'failed', last_error = ?, updated_at = ?
+        WHERE status IN ('transcribing', 'analyzing')`,
+      [INTERRUPTED_TASK_MESSAGE, timestamp],
+    ).changes;
+    const jobs = run(
+      db,
+      `UPDATE job_runs
+          SET status = 'failure', message = ?, finished_at = ?
+        WHERE status = 'running'`,
+      [INTERRUPTED_TASK_MESSAGE, timestamp],
+    ).changes;
+    db.exec('COMMIT');
+    return { recordings, jobs };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 export function touchRecording(db: DatabaseSync, id: number, patch: Record<string, SqlParam>): void {
   const keys = Object.keys(patch);
   if (keys.length === 0) return;
