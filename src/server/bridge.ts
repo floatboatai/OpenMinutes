@@ -3,18 +3,14 @@
 import { spawn } from 'node:child_process';
 import type { DatabaseSync } from 'node:sqlite';
 import type { BridgeRunResult, DeviceEnv, DeviceStatus, EnvProbe, ParsedDeviceFile } from '../contracts/app';
-import { runCommand, terminateChild } from './media';
-import { pythonCandidates, ffmpegCandidates, pythonRuntimeEnv as pythonEnvFor, uvPythonCandidates } from './tools';
-export { pythonCandidates, ffmpegCandidates, userSiteDir, pythonRuntimeEnv } from './tools';
+import { terminateChild } from './media';
+import { findFfmpeg, probePython, probeBleak, probeSdk, pythonRuntimeEnv as pythonEnvFor } from './tools';
+export { pythonCandidates, ffmpegCandidates, userSiteDir, pythonRuntimeEnv, probePython, probeBleak, probeSdk } from './tools';
 import { nowIso, readSetting } from './sql';
 import { SDK_ACTION_SCRIPT } from './sdk-script';
 
 export async function resolveFfmpeg(db: DatabaseSync): Promise<string | null> {
-  for (const candidate of ffmpegCandidates(readSetting(db, 'ffmpeg_path'))) {
-    const outcome = await runCommand(candidate, ['-hide_banner', '-version'], 8000);
-    if (outcome.ok) return candidate;
-  }
-  return null;
+  return findFfmpeg(readSetting(db, 'ffmpeg_path'));
 }
 
 function textField(stdout: string, key: string): string | null {
@@ -52,64 +48,6 @@ export function parseStatus(stdout: string): DeviceStatus | null {
     recordingState: textField(stdout, '当前录音状态'),
     hotspotSsid: textField(stdout, '热点 SSID'),
   };
-}
-
-export async function probePython(configured: string): Promise<{ probe: EnvProbe; command: string | null }> {
-  const managed = await uvPythonCandidates();
-  const candidates = [...new Set([...pythonCandidates(configured), ...managed].filter(Boolean))];
-  for (const candidate of candidates) {
-    const outcome = await runCommand(candidate, ['-c',
-      'import sys;print(sys.executable);print("Python "+sys.version.split()[0]);sys.exit(0 if sys.version_info >= (3,10) else 1)',
-    ], 8000);
-    if (outcome.ok) {
-      const [executable, version] = outcome.stdout.trim().split(/\r?\n/);
-      if (!executable) continue;
-      return { probe: { ok: true, detail: `${executable} · ${version}`, resolvedPath: executable }, command: executable };
-    }
-  }
-  return { probe: { ok: false, detail: '未找到可用的 python 解释器', resolvedPath: null }, command: null };
-}
-
-export async function probeBleak(pythonCommand: string | null): Promise<EnvProbe> {
-  if (!pythonCommand) return { ok: false, detail: '需要先有可用的 Python 才能检查 bleak', resolvedPath: null };
-  const env = await pythonEnvFor(pythonCommand);
-  const outcome = await runCommand(
-    pythonCommand,
-    ['-c', [
-      'import bleak, importlib.metadata as m, sys',
-      'if sys.platform == "win32":',
-      '    from bleak.backends.winrt.client import BleakClientWinRT',
-      '    from bleak.backends.winrt.scanner import BleakScannerWinRT',
-      'elif sys.platform == "darwin":',
-      '    from bleak.backends.corebluetooth.client import BleakClientCoreBluetooth',
-      '    from bleak.backends.corebluetooth.scanner import BleakScannerCoreBluetooth',
-      'elif sys.platform.startswith("linux"):',
-      '    from bleak.backends.bluezdbus.client import BleakClientBlueZDBus',
-      '    from bleak.backends.bluezdbus.scanner import BleakScannerBlueZDBus',
-      'print("bleak " + m.version("bleak"))',
-    ].join('\n')],
-    25000,
-    env,
-  );
-  if (outcome.ok) {
-    const version = outcome.stdout.trim().replace(/^bleak\s+/, '') || 'unknown';
-    return { ok: true, detail: `bleak ${version} 可导入`, resolvedPath: pythonCommand };
-  }
-  const hint = outcome.stderr.split('\n').filter(Boolean).pop() ?? 'import bleak 失败';
-  return { ok: false, detail: hint.slice(0, 300), resolvedPath: null };
-}
-
-export async function probeSdk(pythonCommand: string | null): Promise<EnvProbe> {
-  if (!pythonCommand) return { ok: false, detail: '需要先有可用的 Python 才能检查 memotalk-sdk', resolvedPath: null };
-  const outcome = await runCommand(
-    pythonCommand,
-    ['-c', 'from memotalk import MemoTalkClient; from importlib.metadata import version; print("memotalk-sdk " + version("memotalk-sdk"))'],
-    25000,
-    await pythonEnvFor(pythonCommand),
-  );
-  return outcome.ok
-    ? { ok: true, detail: `${outcome.stdout.trim()} 可导入`, resolvedPath: pythonCommand }
-    : { ok: false, detail: `当前 Python 无法导入 memotalk-sdk：${outcome.stderr.trim().slice(-300)}`, resolvedPath: null };
 }
 
 export async function probeEnvironment(db: DatabaseSync): Promise<DeviceEnv> {

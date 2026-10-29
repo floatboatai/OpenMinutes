@@ -4,6 +4,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { runCommand } from './media';
+import type { EnvProbe } from '../contracts/app';
 
 export interface ToolContext {
   platform: NodeJS.Platform;
@@ -98,4 +99,61 @@ export async function pythonRuntimeEnv(python: string | null): Promise<NodeJS.Pr
     PYTHONIOENCODING: 'utf-8',
     ...(site ? { PYTHONPATH: [site, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) } : {}),
   };
+}
+
+export async function findFfmpeg(configured: string): Promise<string | null> {
+  for (const candidate of ffmpegCandidates(configured)) {
+    const outcome = await runCommand(candidate, ['-hide_banner', '-version'], 8000);
+    if (outcome.ok) return candidate;
+  }
+  return null;
+}
+
+export async function probePython(configured: string): Promise<{ probe: EnvProbe; command: string | null }> {
+  const managed = await uvPythonCandidates();
+  const candidates = [...new Set([...pythonCandidates(configured), ...managed].filter(Boolean))];
+  for (const candidate of candidates) {
+    const outcome = await runCommand(candidate, ['-c',
+      'import sys;print(sys.executable);print("Python "+sys.version.split()[0]);sys.exit(0 if sys.version_info >= (3,10) else 1)',
+    ], 8000);
+    if (outcome.ok) {
+      const [executable, version] = outcome.stdout.trim().split(/\r?\n/);
+      if (!executable) continue;
+      return { probe: { ok: true, detail: `${executable} · ${version}`, resolvedPath: executable }, command: executable };
+    }
+  }
+  return { probe: { ok: false, detail: '未找到 Python >=3.10 解释器', resolvedPath: null }, command: null };
+}
+
+export async function probeBleak(pythonCommand: string | null): Promise<EnvProbe> {
+  if (!pythonCommand) return { ok: false, detail: '需要先有可用的 Python 才能检查 bleak', resolvedPath: null };
+  const outcome = await runCommand(pythonCommand, ['-c', [
+    'import bleak, importlib.metadata as m, sys',
+    'if sys.platform == "win32":',
+    '    from bleak.backends.winrt.client import BleakClientWinRT',
+    '    from bleak.backends.winrt.scanner import BleakScannerWinRT',
+    'elif sys.platform == "darwin":',
+    '    from bleak.backends.corebluetooth.client import BleakClientCoreBluetooth',
+    '    from bleak.backends.corebluetooth.scanner import BleakScannerCoreBluetooth',
+    'elif sys.platform.startswith("linux"):',
+    '    from bleak.backends.bluezdbus.client import BleakClientBlueZDBus',
+    '    from bleak.backends.bluezdbus.scanner import BleakScannerBlueZDBus',
+    'print("bleak " + m.version("bleak"))',
+  ].join('\n')], 25000, await pythonRuntimeEnv(pythonCommand));
+  if (outcome.ok) {
+    const version = outcome.stdout.trim().replace(/^bleak\s+/, '') || 'unknown';
+    return { ok: true, detail: `bleak ${version} 可导入`, resolvedPath: pythonCommand };
+  }
+  const hint = outcome.stderr.split('\n').filter(Boolean).pop() ?? 'import bleak 失败';
+  return { ok: false, detail: hint.slice(0, 300), resolvedPath: null };
+}
+
+export async function probeSdk(pythonCommand: string | null): Promise<EnvProbe> {
+  if (!pythonCommand) return { ok: false, detail: '需要先有可用的 Python 才能检查 memotalk-sdk', resolvedPath: null };
+  const outcome = await runCommand(pythonCommand,
+    ['-c', 'from memotalk import MemoTalkClient; from importlib.metadata import version; print("memotalk-sdk " + version("memotalk-sdk"))'],
+    25000, await pythonRuntimeEnv(pythonCommand));
+  return outcome.ok
+    ? { ok: true, detail: `${outcome.stdout.trim()} 可导入`, resolvedPath: pythonCommand }
+    : { ok: false, detail: `当前 Python 无法导入 memotalk-sdk：${outcome.stderr.trim().slice(-300)}`, resolvedPath: null };
 }
