@@ -77,7 +77,7 @@ src/
     index.ts       服务装配与自动重连启动
     routes/        按领域拆分的 HTTP 路由
     app-route.ts   应用信息、概览与标签列表路由
-    http.ts        统一 { ok, data | error } 信封与错误码映射
+    http.ts        统一 API 信封与顶层 error/code 映射
     sql.ts         node:sqlite 薄封装、设置读写、任务记录
     repo.ts        录音、分类、标签与概览查询
     library.ts     录音库根目录、月目录与历史音频路径解析
@@ -93,6 +93,7 @@ src/
     bridge.ts      memotalk-sdk Python API 桥接（固定参数，不接受拼接命令）
     sdk-script.ts  SDK 状态、清单、下载操作的 Python 脚本
     live.ts        实时音频采集、文件落盘与会话保存
+    live-audio.ts  实时 MP3 解码参数与按秒分帧的 PCM 流
     live-asr.ts    按需开启的实时 ASR 会话与推流
     live-script.ts SDK 实时音频流的 Python 脚本
   ui/              React 界面：概览 / 录音库 / 详情 / 设备 / 分类 / 实时 / 设置
@@ -169,7 +170,7 @@ index.html         UI 构建入口
 | `PATCH`, `DELETE` | `/api/categories/:id` | 修改或删除分类 |
 | `GET`, `PATCH` | `/api/settings` | 读取设置，或修改上文列出的可写设置键 |
 
-JSON 响应统一为 `{ ok: true, data }` / `{ ok: false, error: { code, message } }` 信封。音频接口成功时返回音频流。
+JSON 响应统一为 `{ ok: true, data }` / `{ ok: false, error: string, code: string }` 信封。音频接口成功时返回音频流。
 
 ## 设计原则（节选）
 

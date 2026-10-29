@@ -12,7 +12,7 @@
 
 | 模块 | 职责 |
 | --- | --- |
-| `server/http.ts` | 统一 `{ ok, data \| error }` 信封与错误码映射 |
+| `server/http.ts` | 统一 `{ ok: true, data }` / `{ ok: false, error: string, code: string }` 信封与错误码映射 |
 | `server/sql.ts` | node:sqlite 薄封装、设置读写、任务记录、标签同步 |
 | `server/repo.ts` | 录音列表/详情/分类/总览的读取查询 |
 | `server/app-route.ts` | `/api/app`、`/api/overview`、`/api/tags` |
@@ -28,6 +28,7 @@
 | `server/jobs.ts` | `trackTask` 与队列装配、导入/拉取后自动转录 |
 | `server/bridge.ts`、`server/sdk-script.ts` | 探测 Python/bleak/SDK/ffmpeg，以固定 Python 脚本调用 SDK API |
 | `server/live.ts`、`server/live-script.ts` | 实时采集、音频落盘与停止后的录音/文本保存 |
+| `server/live-audio.ts` | 实时 MP3 解码参数与按秒分帧的 PCM 流 |
 | `server/live-asr.ts` | 按需开启实时识别会话、推流与会话重建 |
 | `server/routes/*` | 按领域拆分的 HTTP 路由 |
 

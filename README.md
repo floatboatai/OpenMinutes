@@ -77,7 +77,7 @@ src/
     index.ts       Server assembly and automatic-connection startup
     routes/        HTTP routes grouped by domain
     app-route.ts   App metadata, overview, and tag-list routes
-    http.ts        Shared { ok, data | error } envelope and error-code mapping
+    http.ts        Shared API envelope and top-level error/code mapping
     sql.ts         Thin node:sqlite wrapper, settings, and job records
     repo.ts        Recording, category, tag, and overview queries
     library.ts     Library root, monthly folders, and legacy audio-path resolution
@@ -93,6 +93,7 @@ src/
     bridge.ts      memotalk-sdk Python API bridge (fixed arguments, no concatenated commands)
     sdk-script.ts  Python script for SDK status, listing, and download actions
     live.ts        Live audio capture, file storage, and session persistence
+    live-audio.ts  Live MP3 decoder arguments and one-second PCM framing
     live-asr.ts    On-demand live ASR sessions and frame streaming
     live-script.ts Python script for SDK live audio streaming
   ui/              React UI: overview / library / details / device / categories / live / settings
@@ -169,7 +170,7 @@ Flags accept only `"0"` or `"1"`. Background checks run while the workbench serv
 | `PATCH`, `DELETE` | `/api/categories/:id` | Update or delete a category |
 | `GET`, `PATCH` | `/api/settings` | Read settings or update the writable keys listed above |
 
-JSON responses use the `{ ok: true, data }` / `{ ok: false, error: { code, message } }` envelope. The audio endpoint returns an audio stream on success.
+JSON responses use the `{ ok: true, data }` / `{ ok: false, error: string, code: string }` envelope. The audio endpoint returns an audio stream on success.
 
 ## Design principles
 
