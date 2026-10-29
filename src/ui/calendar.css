@@ -1,0 +1,54 @@
+.calendar-page h1 { display: flex; align-items: center; gap: 9px; }
+.calendar-page input, .calendar-page select { max-width: 100%; min-width: 0; }
+.calendar-page .page__actions { align-items: center; }
+.calendar-layout { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(250px, 1fr) minmax(280px, 1.3fr); border-block: 1px solid var(--app-border); min-height: 640px; }
+.calendar-layout > * { min-width: 0; padding: 18px; overflow-wrap: anywhere; }
+.calendar-timeline { background: var(--app-surface-2); padding-inline: 10px; }
+.calendar-timeline details { border-bottom: 1px solid var(--app-border); padding-block: 8px; }
+.calendar-timeline summary { cursor: pointer; padding: 7px 4px; font-weight: 600; }
+.calendar-timeline summary > span:last-child { float: right; color: var(--app-muted); margin-right: 4px; }
+.calendar-event { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 12px 10px; margin-block: 4px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 6px; }
+.calendar-event strong { font-size: 13px; font-weight: 600; }
+.calendar-event-time { color: var(--tone-info); font-size: 12px; font-variant-numeric: tabular-nums; }
+.calendar-event-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; font-size: 11px; }
+.calendar-event:hover, .calendar-recording-button:hover { background: var(--app-primary-soft); }
+.calendar-page .is-selected { background: var(--app-primary-soft); border-color: var(--app-primary); }
+.calendar-done { color: var(--tone-success); }
+.calendar-recordings { border-inline: 1px solid var(--app-border); }
+.calendar-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 18px; }
+.calendar-panel-head h2, .calendar-results h2 { font-size: 17px; }
+.calendar-panel-head .page__actions { flex-shrink: 0; }
+.calendar-event-info p { white-space: pre-wrap; margin: 0 0 14px; }
+.calendar-event-info dl { display: grid; grid-template-columns: 45px minmax(0, 1fr); gap: 8px; font-size: 12px; }
+.calendar-event-info dt { color: var(--app-muted); }
+.calendar-event-info dd { margin: 0; }
+.calendar-list-title { font-size: 13px; margin: 24px 0 8px; }
+.calendar-recording { padding-block: 10px; border-bottom: 1px solid var(--app-border); }
+.calendar-recording-button { display: flex; align-items: flex-start; gap: 8px; text-align: left; width: 100%; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 8px 4px; }
+.calendar-recording-button svg { flex-shrink: 0; margin-top: 3px; color: var(--tone-info); }
+.calendar-recording-button span { min-width: 0; }
+.calendar-recording-button strong, .calendar-recording-button small { display: block; overflow-wrap: anywhere; }
+.calendar-recording-button strong { font-weight: 500; }
+.calendar-recording-button small { color: var(--app-muted); margin-top: 4px; font-size: 11px; }
+.calendar-link { display: grid; gap: 4px; font-size: 12px; margin-top: 8px; }
+.calendar-link > span { color: var(--app-muted); }
+.calendar-results { background: var(--app-surface); }
+.calendar-markdown { font: inherit; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.calendar-transcript h3 { font-size: 14px; margin-top: 24px; margin-bottom: 8px; }
+.calendar-transcript ul { list-style: disc; padding-left: 20px; }
+.calendar-form { display: grid; gap: 14px; }
+.calendar-form input { width: 100%; }
+.calendar-suggestion { padding: 10px 0; font-size: 12px; }
+.calendar-suggestion button { text-align: left; white-space: normal; height: auto; }
+.calendar-page button:focus-visible, .calendar-page summary:focus-visible { outline: 2px solid var(--app-primary); outline-offset: 2px; }
+@media (max-width: 1180px) {
+  .calendar-layout { grid-template-columns: minmax(180px, .8fr) minmax(250px, 1.4fr); }
+  .calendar-results { grid-column: 1 / -1; border-top: 1px solid var(--app-border); min-height: 220px; }
+}
+@media (max-width: 620px) {
+  .calendar-layout { grid-template-columns: minmax(0, 1fr); }
+  .calendar-recordings { border-inline: 0; border-top: 1px solid var(--app-border); }
+  .calendar-timeline { max-height: 360px; overflow: auto; }
+  .calendar-layout > * { padding: 14px; }
+  .calendar-panel-head { flex-wrap: wrap; }
+}

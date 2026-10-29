@@ -1,7 +1,7 @@
 // ABOUTME: 工作台外壳：侧边导航、哈希路由与页面装配。
 
 import { useEffect, useState } from 'react';
-import { AudioLines, Captions, FolderTree, HardDriveDownload, LayoutDashboard, LibraryBig, Settings2 } from 'lucide-react';
+import { AudioLines, CalendarDays, Captions, FolderTree, HardDriveDownload, LayoutDashboard, LibraryBig, Settings2 } from 'lucide-react';
 import { api } from './api';
 import type { AppInfo, Overview } from '../contracts/app';
 import { useAsyncData } from './useApi';
@@ -13,6 +13,8 @@ import { DevicePage } from './pages/Device';
 import { LivePage } from './pages/Live';
 import { CategoriesPage } from './pages/Categories';
 import { SettingsPage } from './pages/Settings';
+import { CalendarPage } from './pages/Calendar';
+import './calendar.css';
 
 type Route =
   | { name: 'overview' }
@@ -21,11 +23,13 @@ type Route =
   | { name: 'categories' }
   | { name: 'settings' }
   | { name: 'live' }
+  | { name: 'calendar' }
   | { name: 'detail'; id: number };
 
 const NAV = [
   { key: 'overview', label: '概览', icon: LayoutDashboard },
   { key: 'library', label: '录音库', icon: LibraryBig },
+  { key: 'calendar', label: '日历视图', icon: CalendarDays },
   { key: 'live', label: '实时字幕', icon: Captions },
   { key: 'device', label: '设备接入', icon: HardDriveDownload },
   { key: 'categories', label: '分类', icon: FolderTree },
@@ -39,7 +43,7 @@ function parseHash(): Route {
     if (Number.isInteger(id) && id > 0) return { name: 'detail', id };
     return { name: 'library' };
   }
-  if (raw === 'library' || raw === 'device' || raw === 'categories' || raw === 'settings' || raw === 'live') {
+  if (raw === 'library' || raw === 'device' || raw === 'categories' || raw === 'settings' || raw === 'live' || raw === 'calendar') {
     return { name: raw };
   }
   return { name: 'overview' };
@@ -116,6 +120,7 @@ export function App() {
         <main className="main">
           {route.name === 'overview' ? <OverviewPage onOpen={openRecording} onNavigate={navigate} /> : null}
           {route.name === 'library' ? <LibraryPage onOpen={openRecording} onNavigate={navigate} /> : null}
+          {route.name === 'calendar' ? <CalendarPage /> : null}
           {route.name === 'detail' ? (
             <DetailPage id={route.id} onBack={() => navigate('library')} onRemoved={() => navigate('library')} />
           ) : null}
