@@ -1,46 +1,28 @@
 #!/usr/bin/env node
-// Stops the server this run launched (by its recorded pid, confirmed via the run's nonce) and
-// deletes the run's scratch dir. Evidence in .workbench/verify-evidence/<runId>/ is never touched.
-// Usage: node .claude/skills/verify-openminutes/scripts/cleanup.mjs <runId>
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+// Deletes only a validated run after confirming its recorded process has stopped.
+import { existsSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { alive, assertDeletionSafe, assertIdentity, readRun, runPaths, waitStopped } from './run-safety.mjs';
 
-const root = resolve(process.env.OPENMINUTES_ROOT ?? resolve(import.meta.dirname, '../../../..'));
-const runId = process.argv[2];
-if (!runId) {
-  console.error('usage: cleanup.mjs <runId>');
-  process.exit(2);
-}
-const runDir = join(root, '.workbench', 'verify', runId);
-const runPath = join(runDir, 'run.json');
-if (existsSync(runPath)) {
-  const run = JSON.parse(readFileSync(runPath, 'utf8'));
-  let ours = false;
-  try {
-    const health = await fetch(`${run.url}/__workbench/health`, { headers: { authorization: `Bearer ${run.nonce}` } });
-    ours = health.status === 200 && (await health.json()).pid === run.pid;
-  } catch {
-    // Already gone.
+export async function cleanup(root, runId) {
+  const { runDir, evidenceDir } = runPaths(root, runId);
+  assertDeletionSafe(root, runId);
+  if (existsSync(join(runDir, 'run.json'))) {
+    const run = readRun(root, runId);
+    if (alive(run.pid)) {
+      await assertIdentity(run);
+      process.kill(run.pid);
+      await waitStopped(run.pid);
+    }
   }
-  if (ours) {
-    process.kill(run.pid);
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline && alive(run.pid)) await new Promise((done) => setTimeout(done, 200));
-    console.log(alive(run.pid) ? `pid ${run.pid} still alive` : `stopped pid ${run.pid}`);
-  } else {
-    console.log(`pid ${run.pid} is not answering as this run; not killing anything`);
-  }
+  // Recheck immediately before recursive removal, not only before the network request.
+  assertDeletionSafe(root, runId);
+  rmSync(runDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  return { removed: runDir, evidenceKept: existsSync(evidenceDir) ? evidenceDir : null };
 }
-// The SQLite handle is released once the process exits; retry briefly for Windows file locks.
-rmSync(runDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
-const evidenceDir = join(root, '.workbench', 'verify-evidence', runId);
-console.log(JSON.stringify({ removed: runDir, evidenceKept: existsSync(evidenceDir) ? evidenceDir : null }));
 
-function alive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const root = resolve(process.env.OPENMINUTES_ROOT ?? resolve(import.meta.dirname, '../../../..'));
+  console.log(JSON.stringify(await cleanup(root, process.argv[2])));
 }

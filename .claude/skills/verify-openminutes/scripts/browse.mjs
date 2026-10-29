@@ -22,6 +22,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { assertIdentity, readRun, safePath, validateRunId } from './run-safety.mjs';
 
 const root = resolve(process.env.OPENMINUTES_ROOT ?? resolve(import.meta.dirname, '../../../..'));
 const [runId, label, stepsArg] = process.argv.slice(2);
@@ -29,9 +30,11 @@ if (!runId || !label || !stepsArg) {
   console.error("usage: browse.mjs <runId> <label> '<steps JSON>' | @file.json");
   process.exit(2);
 }
-const run = JSON.parse(readFileSync(join(root, '.workbench', 'verify', runId, 'run.json'), 'utf8'));
+const run = readRun(root, runId);
+await assertIdentity(run);
+validateRunId(label);
 const steps = JSON.parse(stepsArg.startsWith('@') ? readFileSync(stepsArg.slice(1), 'utf8') : stepsArg);
-const out = join(run.evidenceDir, label);
+const out = safePath(run.evidenceDir, label);
 mkdirSync(out, { recursive: true });
 const logLine = (line) => {
   console.log(line);
