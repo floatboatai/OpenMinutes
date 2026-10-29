@@ -12,7 +12,7 @@ import { ensureMonthDir, libraryRoot } from './library';
 import { fileSize } from './media';
 import { nowIso, readSetting, row, run } from './sql';
 import { liveScriptSource } from './live-script';
-import { pumpFrames } from './live-asr';
+import { finishLiveAsr, pumpFrames } from './live-asr';
 import { createPcmFramer, LIVE_DECODER_ARGS } from './live-audio';
 
 const PCM_BYTES_PER_SECOND = 32_000;
@@ -35,7 +35,8 @@ interface Runtime {
   streamId: string | null;
   seq: number;
   queue: Array<Buffer<ArrayBufferLike>>;
-  pumping: boolean;
+  pumping: Promise<void> | null;
+  eventsDone: Promise<void> | null;
   restarts: number;
   stopping: boolean;
   exited: boolean;
@@ -115,7 +116,7 @@ function handleStderrLine(rt: Runtime, line: string): void {
     const payload = JSON.parse(trimmed) as Record<string, unknown>;
     const event = String(payload.event ?? '');
     if (event === 'found') rt.deviceName = String(payload.name ?? '') || null;
-    if (event === 'connected' || event === 'streaming') {
+    if (event === 'streaming') {
       rt.status = 'listening';
       rt.message = null;
     }
@@ -123,7 +124,6 @@ function handleStderrLine(rt: Runtime, line: string): void {
       rt.status = 'error';
       rt.message = String(payload.message ?? '采集脚本报错');
     }
-    if (event === 'streaming') rt.status = 'listening';
   } catch {
     /* 非法 JSON 行忽略 */
   }
@@ -167,7 +167,8 @@ export async function startLive(app: WorkbenchServer): Promise<LiveState> {
     streamId: null,
     seq: 0,
     queue: [],
-    pumping: false,
+    pumping: null,
+    eventsDone: null,
     restarts: 0,
     stopping: false,
     exited: false,
@@ -252,7 +253,7 @@ export async function stopLive(app: WorkbenchServer): Promise<LiveState> {
 
   session.stopping = true;
   try {
-    if (session.python && !session.python.killed) {
+    if (session.python && !session.python.killed && !session.exited) {
       try {
         session.python.stdin.write('stop\n');
       } catch {
@@ -280,19 +281,8 @@ export async function stopLive(app: WorkbenchServer): Promise<LiveState> {
       if (session.ffmpeg.exitCode === null) session.ffmpeg.kill();
     }
 
-    await pumpFrames(session);
+    const text = await finishLiveAsr(session);
     await closeFileStream(session.fileStream);
-
-    let text = session.finals.join('\n').trim();
-    if (session.streamId) {
-      try {
-        const final = await app.host.asr.stop({ streamId: session.streamId });
-        const tail = (final.text ?? '').trim();
-        if (!text && tail) text = tail;
-      } catch {
-        /* 识别收尾失败不阻断落库 */
-      }
-    }
 
     if (session.audioBytes === 0 && !text) {
       session.message = session.message ?? '这次没有采集到音频（设备可能未唤醒或未进入录音）';
