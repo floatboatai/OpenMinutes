@@ -1,10 +1,17 @@
 import type { WorkbenchServer } from '../../../sdk/runtime.mjs';
-import { asObject, BadInput, pathParam } from '../../contracts/input';
+import { asObject, BadInput, pathParam, reqString } from '../../contracts/input';
+import { importCalendarFile } from '../calendar-import';
 import { calendarRange, calendarRecordings, getCalendarEvent, linkCalendarRecording, listCalendarEvents, parseCalendarInput, recordingSuggestions, saveCalendarEvent } from '../calendar';
 import { api } from '../http';
 import { readRecordingDetail } from '../repo';
 
 export function registerCalendarRoutes(app: WorkbenchServer): void {
+  app.route('POST', '/api/calendar/import', api((context) => {
+    const body = asObject(context.body);
+    const filename = reqString(body, 'filename', 255);
+    if (!filename.toLowerCase().endsWith('.ics')) throw new BadInput('请选择 .ics 文件');
+    return importCalendarFile(context.database, reqString(body, 'content', 2 * 1024 * 1024), filename);
+  }));
   app.route('GET', '/api/calendar/events', api((context) => {
     const [start, end] = calendarRange(context.url.searchParams.get('start') ?? '', context.url.searchParams.get('end') ?? '');
     return listCalendarEvents(context.database, start, end);
