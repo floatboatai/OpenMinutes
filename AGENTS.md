@@ -1,0 +1,9 @@
+# Repository rules
+
+- Communicate in Chinese. Keep repository instructions in AGENTS.md only.
+- Python development commands use `uv run`; Node package management uses `pnpm`.
+- New remote repositories default to private. Do not change this repository's visibility.
+- Never inspect or modify real Floatboat workbench data or stop existing Floatboat processes.
+- Verification uses an isolated checkout-local data directory. Do not modify or copy `.claude/skills/verify-openminutes`.
+- In PowerShell, check `Test-Path` before reading optional files (this checkout initially had no AGENTS.md).
+- Run independent shell reads separately, not with semicolon command chains. Pass complex browser steps through a JSON file, not nested shell quoting.
