@@ -20,12 +20,13 @@ description: 在本机真实拉起 OpenMinutes（录音笔工作台）的服务�
 
 ```bash
 node .claude/skills/verify-openminutes/scripts/build.mjs          # ~10s；严格类型检查 + 打包到 dist/，失败时打印诊断并 exit 1
-node .claude/skills/verify-openminutes/scripts/launch.mjs <runId>  # runId 省略则按时间生成
+node .claude/skills/verify-openminutes/scripts/launch.mjs <runId>  # runId 省略则生成 UUID
 ```
 
 - 要验收另一个 worktree 或分支的代码时，给每条命令都加上 `OPENMINUTES_ROOT=<那个 checkout 的绝对路径>`。build、run 目录和证据都会落在那个 checkout 里，不需要往它里面复制 skill。
 - `build.mjs` 调用 `C:/Program Files/Floatboat/resources/workbench-toolchain/compiler.mjs`（可用 `FLOATBOAT_TOOLCHAIN` 覆盖），产物与 Host 构建一致。改了 `src/` 之后必须重新 build 再 launch，否则验证的是旧代码（doctor 会报 `dist/ is older than src/`）。
-- `launch.mjs` 就绪的判据是服务输出 `{"type":"ready","url":…}`；随后它立即 `PATCH /api/settings`，把 `import_dir` / `library_dir` 指到本 run 的 `inbox` / `library`，并把 `auto_connect` / `auto_pull` / `auto_transcribe` / `auto_analyze` 设为 `0`（必须赶在 30 秒后的第一次自动连接之前）。成功后打印 `{runId, url, pid, runDir, evidenceDir}`。
+- runId 使用 1–80 个字母、数字、下划线或连字符，首字符是字母或数字，不使用 Windows 保留设备名。省略时生成 UUID。已有 scratch 或保留证据的 ID 一律拒绝复用，cleanup 后也要换新 ID。
+- `launch.mjs` 在启动子进程前向新建的 scratch 数据库写入隔离设置：`import_dir` / `library_dir` 指向本 run，四个 auto 开关为 `0`。收到本次日志的 ready 后，先用 nonce 核对 PID/generation，再 PATCH 设置。ready、网络、JSON 或 run.json 落盘失败都会停止并等待本次子进程退出，保留日志。可显式传 `--no-host`；本分支始终不连接 Host。
 - 目录布局：
   - `.workbench/verify/<runId>/`：`run.json`（url、pid、nonce、各目录）、`data/data.sqlite`、`inbox/`、`library/`、`browser-profile/`。cleanup 会删掉它。
   - `.workbench/verify-evidence/<runId>/`：`server.log` 与每次 `browse.mjs` 的 `<label>/` 子目录。cleanup **不会**删它。
@@ -89,7 +90,7 @@ ffmpeg -hide_banner -loglevel error -f lavfi -i "sine=frequency=440:duration=6" 
 node .claude/skills/verify-openminutes/scripts/cleanup.mjs <runId>
 ```
 
-cleanup 只会 kill `run.json` 里记录的 pid，并且要先用 nonce 确认这个进程确实属于本 run。确认后删除 `.workbench/verify/<runId>/`，最后打印 `evidenceKept` 路径。不要按进程名 kill：用户自己的 Chrome 和 Floatboat 也在跑。每次失败的尝试之后也要跑一遍 cleanup。`browse.mjs` 在退出时会自己关掉浏览器。要确认是否有残留的无头浏览器，用：
+cleanup 先校验 runId、绝对路径和 realpath containment，拒绝路径组件及 scratch 内的符号链接或 junction。它只会 kill `run.json` 记录且 nonce/PID/generation 身份匹配的进程；身份不匹配或进程未退出则报错并保留 scratch。删除前会再次校验路径，只删除 `.workbench/verify/<runId>/` 并打印 `evidenceKept`。不要按进程名 kill。每次失败的尝试之后也要跑一遍 cleanup；异常链接需先人工检查，不能绕过校验。`browse.mjs` 在退出时会自己关掉浏览器。要确认是否有残留的无头浏览器，用：
 
 ```bash
 powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | Where-Object { \$_.CommandLine -like '*verify*browser-profile*' } | Select-Object ProcessId"
@@ -104,5 +105,6 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='ch
 | `scripts/doctor.mjs <runId>` | 只读体检，exit 0 才可以继续驱动 |
 | `scripts/browse.mjs <runId> <label> <steps>` | 无头浏览器驱动页面，并留存证据 |
 | `scripts/cleanup.mjs <runId>` | 停掉本 run 的进程并删除 scratch，保留证据 |
+| `scripts/run-safety.test.mjs` | `node --test` 运行隔离 fixture 回归，不连接 Host/BLE |
 
 维护功能清单：应用变化后用 `/pstack:maintain-verification-skill` 更新 `features/`。

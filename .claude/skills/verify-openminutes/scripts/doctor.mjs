@@ -2,8 +2,9 @@
 // Read-only: is this run's instance alive, ours, current, and still fenced off from real data?
 // Usage: node .claude/skills/verify-openminutes/scripts/doctor.mjs <runId>
 // Exit 0 = safe to drive; exit 1 = do not drive (reasons printed).
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { readRun, runPaths } from './run-safety.mjs';
 
 const root = resolve(process.env.OPENMINUTES_ROOT ?? resolve(import.meta.dirname, '../../../..'));
 const runId = process.argv[2];
@@ -11,12 +12,12 @@ if (!runId) {
   console.error('usage: doctor.mjs <runId>');
   process.exit(2);
 }
-const runPath = join(root, '.workbench', 'verify', runId, 'run.json');
+const runPath = join(runPaths(root, runId).runDir, 'run.json');
 if (!existsSync(runPath)) {
   console.error(`no run.json for ${runId}`);
   process.exit(1);
 }
-const run = JSON.parse(readFileSync(runPath, 'utf8'));
+const run = readRun(root, runId);
 const problems = [];
 const report = { runId, url: run.url, pid: run.pid };
 
