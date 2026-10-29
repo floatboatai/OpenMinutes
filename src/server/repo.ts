@@ -6,6 +6,7 @@ import type {
   Category,
   Overview,
   RecordingDetail,
+  RecordingListResult,
   RecordingSource,
   RecordingStatus,
   RecordingSummary,
@@ -14,6 +15,7 @@ import type {
 } from '../contracts/app';
 import { bool, jsonArray, num, numOr, row, rows, str, strOr } from './sql';
 import { likePattern } from '../contracts/input';
+import { hasRecordingTasks, queuedRecordingStatus } from './queue';
 
 const RECORDING_SELECT = `
   SELECT r.id, r.filename, r.title, r.source, r.status, r.category_id,
@@ -56,12 +58,16 @@ export interface ListFilters {
 
 function toSummary(source: Record<string, unknown>, tagMap: Map<number, Array<{ id: number; name: string }>>): RecordingSummary {
   const id = numOr(source.id, 0);
+  const storedStatus = strOr(source.status, 'pending') as RecordingStatus;
+  const status = storedStatus === 'transcribing' || storedStatus === 'analyzing'
+    ? storedStatus
+    : queuedRecordingStatus(id) ?? storedStatus;
   return {
     id,
     filename: strOr(source.filename, ''),
     title: str(source.title),
     source: strOr(source.source, 'folder_import') as RecordingSource,
-    status: strOr(source.status, 'pending') as RecordingStatus,
+    status,
     categoryId: num(source.category_id),
     categoryName: str(source.category_name),
     categoryColor: str(source.category_color),
@@ -100,7 +106,7 @@ export function loadTagMap(db: DatabaseSync, ids: number[]): Map<number, Array<{
   return map;
 }
 
-export function listRecordings(db: DatabaseSync, filters: ListFilters): { items: RecordingSummary[]; total: number } {
+export function listRecordings(db: DatabaseSync, filters: ListFilters): RecordingListResult {
   const where: string[] = [];
   const params: Array<string | number> = [];
 
@@ -141,7 +147,9 @@ export function listRecordings(db: DatabaseSync, filters: ListFilters): { items:
     db,
     records.map((item) => numOr(item.id, 0)),
   );
-  return { items: records.map((item) => toSummary(item, tagMap)), total };
+  const hasActiveTasks = hasRecordingTasks()
+    || Boolean(row(db, "SELECT id FROM recordings WHERE status IN ('transcribing', 'analyzing') LIMIT 1"));
+  return { items: records.map((item) => toSummary(item, tagMap)), total, hasActiveTasks };
 }
 
 export function readRecordingSummary(db: DatabaseSync, id: number): RecordingSummary | null {
