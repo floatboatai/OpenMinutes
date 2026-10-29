@@ -94,7 +94,15 @@ Related documentation (in Chinese): [requirements](REQUIREMENTS.md), [engineerin
 
 `devices`, `recordings`, `transcripts`, `analyses`, `categories`, `tags`, `recording_tags`, `job_runs`, `sdk_commands`, and `settings`.
 
-Audio files live in the `audio` data resource directory. The database stores only relative filenames. Deleting a recording moves its audio file to `audio/_trash` instead of permanently deleting it.
+### Storage and directories
+
+- `import_dir` is the scan source and the default audio export destination, defaulting to `~/memo/memotalk/inbox`. Scans create a missing directory, read only its immediate files, and copy supported audio (`.mp3`, `.wav`, `.m4a`, `.aac`, `.ogg`, `.flac`, `.amr`, `.opus`) into the library without removing the originals.
+- `library_dir` defaults to `~/memo/memotalk/raw`. Imports and BLE downloads are copied into `<library_dir>/<yyyy-MM>/`, using the recording month inferred from the filename or a fallback date. Live recordings also go into monthly folders. Use an absolute path or `~/...` for these directory settings; changing the library setting does not relocate existing files.
+- New `recordings.storage_path` values store the full destination path (absolute with the default or an absolute library directory). Historical relative filenames resolve against the Host's `audio` data resource. BLE downloads first use the Host's `audio/_incoming` staging directory, not `import_dir`.
+- Deletion attempts to move audio to `<library_dir>/_trash/<milliseconds>-<basename>` using the **current** library setting, then deletes the recording and its transcript, analysis, tag links, and job history. If the move fails, database deletion still proceeds; `audioMovedToTrash` is then `null`. There is no restore API.
+- Export copies the audio under its original `filename` into `import_dir`, or into the request body's optional `directory`. It creates missing destination directories and can overwrite a same-named file. The detail page uses the default destination. There is no separate export-directory setting.
+
+When resolving `import_dir`, an empty value falls back to the default; a path inside the system temporary directory is replaced with the default and written back to settings. An explicit `directory` in a scan request is used and saved directly, without that temporary-directory fallback.
 
 ## API overview
 
@@ -103,9 +111,9 @@ Audio files live in the `audio` data resource directory. The database stores onl
 | `GET` | `/api/recordings` | List recordings with search, stage/category/tag filters, sorting, and pagination |
 | `GET` | `/api/recordings/:id` | Details: metadata, transcript, AI analysis, and execution history |
 | `PATCH` | `/api/recordings/:id` | Edit title, category, tags, and importance |
-| `DELETE` | `/api/recordings/:id` | Delete a recording (move its file to `audio/_trash`) |
+| `DELETE` | `/api/recordings/:id` | Delete a recording; attempt to move audio to `<library_dir>/_trash/<milliseconds>-<basename>` |
 | `GET` | `/api/recordings/:id/audio` | Audio stream with HTTP Range support (206 and `content-range`; 416 for out-of-range requests) |
-| `POST` | `/api/recordings/:id/export` | Export to a local directory |
+| `POST` | `/api/recordings/:id/export` | Copy audio to `import_dir` by default; optional body field `directory` overrides it |
 | `POST` | `/api/recordings/:id/transcribe` | Transcribe one recording |
 | `POST` | `/api/recordings/:id/organize` | AI classification for one recording |
 | `POST` | `/api/recordings/batch/transcribe`, `/api/recordings/batch/organize` | Batch transcription and classification |

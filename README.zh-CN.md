@@ -94,7 +94,15 @@ tests/             服务端测试
 
 `devices`、`recordings`、`transcripts`、`analyses`、`categories`、`tags`、`recording_tags`、`job_runs`、`sdk_commands`、`settings`。
 
-音频文件存放在 `audio` 数据资源目录，业务库只保存相对文件名；删除录音时文件移入 `audio/_trash` 而不是物理销毁。
+### 存储与目录
+
+- `import_dir` 是扫描来源，也是默认音频导出目录，默认值为 `~/memo/memotalk/inbox`。扫描会创建缺失的目录，只读取当前层文件，将支持的音频（`.mp3`、`.wav`、`.m4a`、`.aac`、`.ogg`、`.flac`、`.amr`、`.opus`）复制进录音库，保留原文件。
+- `library_dir` 默认为 `~/memo/memotalk/raw`。目录导入与 BLE 拉取均复制到 `<library_dir>/<yyyy-MM>/`，月份按文件名推断的录制时间或兜底时间确定。实时录音也写入月目录。这些目录设置请使用绝对路径或 `~/...`；修改录音库设置不会迁移已有文件。
+- 新版 `recordings.storage_path` 保存完整目标路径（默认目录或绝对路径配置下为绝对路径）。历史相对文件名仍从 Host 的 `audio` 数据资源解析。BLE 下载先暂存到 Host 的 `audio/_incoming`，不是 `import_dir`。
+- 删除时先尝试把音频移动到**当前**录音库设置下的 `<library_dir>/_trash/<毫秒时间戳>-<原存储文件名>`，再删除录音及其转录、分析、标签关联和任务历史。移动失败仍会删除数据库记录，此时 `audioMovedToTrash` 为 `null`。目前没有恢复 API。
+- 导出按原始 `filename` 将音频复制到 `import_dir`，也可由请求体的 `directory` 指定目标目录。缺失的目标目录会自动创建，同名文件可能被覆盖。详情页使用默认目标，没有独立的导出目录设置。
+
+解析 `import_dir` 时，空值回落到默认目录；系统临时目录内的路径会被替换为默认目录并写回设置。扫描请求显式传入 `directory` 时则直接使用并保存该路径，不经过临时目录回退。
 
 ## API 速览
 
@@ -103,9 +111,9 @@ tests/             服务端测试
 | `GET` | `/api/recordings` | 列表：搜索 / 阶段 / 分类 / 标签 / 排序 / 分页 |
 | `GET` | `/api/recordings/:id` | 详情（元数据 + 转录 + AI 结论 + 执行记录） |
 | `PATCH` | `/api/recordings/:id` | 人工修正标题、分类、标签、重要度 |
-| `DELETE` | `/api/recordings/:id` | 删除（文件移入 `audio/_trash`） |
+| `DELETE` | `/api/recordings/:id` | 删除录音，尝试将音频移入 `<library_dir>/_trash/<毫秒时间戳>-<原存储文件名>` |
 | `GET` | `/api/recordings/:id/audio` | 音频流，HTTP Range（206 + `content-range`，越界 416） |
-| `POST` | `/api/recordings/:id/export` | 导出到本机目录 |
+| `POST` | `/api/recordings/:id/export` | 默认复制音频到 `import_dir`，可用请求体字段 `directory` 覆盖目标目录 |
 | `POST` | `/api/recordings/:id/transcribe` | 单条转录 |
 | `POST` | `/api/recordings/:id/organize` | 单条 AI 归类 |
 | `POST` | `/api/recordings/batch/transcribe`, `/api/recordings/batch/organize` | 批量转录 / 批量归类 |
