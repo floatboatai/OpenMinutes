@@ -1,0 +1,19 @@
+[
+  {"goto":"#/device"},
+  {"waitText":"1 个音频文件"},
+  {"click":"text=立即扫描"},
+  {"waitText":"导入 1 个文件，跳过 0 个，失败 0 个","timeout":15000},
+  {"goto":"#/rec/1"},
+  {"waitText":"还没有转录文本"},
+  {"screenshot":"01-before.png"},
+  {"aria":"01-before.aria.txt"},
+  {"click":"text=开始转录"},
+  {"waitText":"转录任务已排队"},
+  {"waitText":"HOST_NOT_CONNECTED","timeout":15000},
+  {"expectText":"上次处理未成功"},
+  {"eval":"fetch('/api/recordings/1').then(r => r.json()).then(({data:d}) => { if (d.recording.status !== 'failed' || d.recording.transcriptChars !== 0 || d.jobs[0].status !== 'failure' || !d.lastError.includes('HOST_NOT_CONNECTED')) throw Error('unexpected no-host outcome'); return d; })"},
+  {"screenshot":"02-failed.png"},
+  {"aria":"02-failed.aria.txt"},
+  {"click":"text=执行记录 1"},
+  {"screenshot":"03-jobs.png"}
+]

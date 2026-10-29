@@ -68,6 +68,8 @@ const browser = spawn(
 
 let exitCode = 0;
 let socket;
+let cdp;
+const consoleLines = [];
 try {
   const port = await until(() => readFileSync(portFile, 'utf8').split('\n')[0].trim() || null, 15_000, 'DevToolsActivePort');
   const targets = await until(async () => {
@@ -79,8 +81,7 @@ try {
     socket.onopen = done;
     socket.onerror = fail;
   });
-  const cdp = connect(socket);
-  const consoleLines = [];
+  cdp = connect(socket);
   cdp.on('Runtime.consoleAPICalled', (event) => {
     if (event.type === 'error' || event.type === 'warning') {
       consoleLines.push(`[${event.type}] ${event.args.map((arg) => arg.value ?? arg.description ?? '').join(' ')}`);
@@ -170,12 +171,22 @@ try {
     }
     logLine(`ok ${name}`);
   }
-  writeFileSync(join(out, 'console.log'), consoleLines.join('\n'));
   logLine(`# done; console errors/warnings: ${consoleLines.length}`);
 } catch (error) {
   exitCode = 1;
   logLine(`FAIL ${error.message}`);
+  if (cdp) {
+    try {
+      const shot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+      writeFileSync(join(out, 'failure.png'), Buffer.from(shot.data, 'base64'));
+      const { nodes } = await cdp.send('Accessibility.getFullAXTree');
+      writeFileSync(join(out, 'failure.aria.txt'), renderAx(nodes));
+    } catch {
+      logLine('failure snapshot unavailable');
+    }
+  }
 } finally {
+  writeFileSync(join(out, 'console.log'), consoleLines.join('\n'));
   socket?.close();
   browser.kill();
 }
