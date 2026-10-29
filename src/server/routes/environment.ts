@@ -8,7 +8,11 @@ export function registerEnvironmentRoutes(app: WorkbenchServer) {
   const preflight = appPreflight(app);
   const repair = createEnvironmentRepair({
     host: app.host,
-    report: async (refresh) => (await preflight.get(refresh)).report,
+    report: async (refresh) => {
+      // A check started before the agent finished cannot verify its changes.
+      if (refresh) await preflight.get();
+      return (await preflight.get(refresh)).report;
+    },
     workingDirectory: toolContext().cwd,
   });
   app.route('GET', '/api/environment', api(async () => ({
