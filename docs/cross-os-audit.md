@@ -1,6 +1,7 @@
 # Cross-OS audit
 
 Baseline: main, 2026-10-29. Line references below refer to the pre-change files.
+Server paths in the table are under `src/server/`; Device.tsx is under `src/ui/pages/`.
 
 | Location | Impact / affected OS | Resolution |
 | --- | --- | --- |
@@ -13,10 +14,12 @@ Baseline: main, 2026-10-29. Line references below refer to the pre-change files.
 | ingest.ts:27 | Windows reserved names and trailing dot/space invalid; POSIX basename does not strip Windows separators | Portable filename sanitization |
 | library.ts:17,59 | Backslash home notation on POSIX; prefix-only home abbreviation mistakes sibling folders | Platform-injected home expansion and segment-aware display |
 | media.ts:22-36; bridge.ts:250-262 | Open stdin can hang; SIGTERM is not guaranteed to terminate on POSIX | Close unused stdin, bounded termination with SIGKILL escalation |
+| media.ts:155-167 | Abandoned decode iterator leaves its child process alive on any OS | Terminate and await the decoder in generator finally |
 | live.ts:196,258-281 | EPIPE can crash server; stop writes did not close stdin | Handle pipe errors; EOF stop and bounded hard kill |
 | sdk-script.ts:17; live-script.ts:64 | CoreBluetooth address is UUID, not MAC | Keep SDK device-reported MAC separate from transport identifier; pass transport object unchanged, no MAC filter |
 | Device.tsx:298,422 | Windows-only example and unsupported claim Windows already deleted temp directory | Portable ~/ example and neutral explanation |
 | routes/device.ts:98 | Repeated GET probes, no startup preflight, no decode/write/Host agent check | Cached preflight, explicit refresh, structured status and repair lifecycle |
+| tools.ts / repair actions (new) | Process cwd is not guaranteed to be the application directory; ephemeral uv --with interpreter disappears at exit | Derive application root from module location in source/build; use a persistent app-local venv |
 
 ## Checked without changing
 
@@ -40,3 +43,51 @@ Linux BlueZ requires a running daemon and appropriate D-Bus permissions.
 Preflight never scans/connects a BLE device. macOS checks authorization and
 controller state without requesting permission; an undetermined state remains
 a warning requiring user action. An agent cannot grant OS privacy permission.
+
+## Verification on Windows
+
+- `pnpm test`: 48 passed, 0 failed, 0 skipped, including the installed SDK fake-device suite.
+- Pure platform scenarios run under Node's test runner for win32/darwin/linux. They cover bundle roots, Homebrew, PATH separators, python3, venv, uv executable discovery, home expansion, path boundaries and case policy.
+- Filesystem tests exercise real directory identity and a junction/symlink ancestor; no assumptions about macOS APFS case sensitivity.
+- Preflight tests cover unsupported systems, macOS permission states, missing imports, unavailable/undeclared Host operations, writable/blocked directories, cache and refresh deduplication.
+- Repair tests use the actual SDK HTTP client against a local fixture, verifying workingDirectory, idempotencyKey, prompt boundaries, progress, terminal failure/cancellation/interruption, fresh inspection, and ambiguous-submit duplicate suppression.
+- Floatboat compiler: strict typecheck and compilation passed. Only the existing large-module warning for Device.tsx remains.
+- Browser E2E uses the pstack worktree's `doctor.mjs`, `browse.mjs`, and `cleanup.mjs` without copying or modifying that skill. Seeded SQLite settings isolate all directories before startup; auto-connect/pull/transcribe/analyze are off.
+- No-Host run: visible preflight failures, explicit `agent 不可用`, disabled repair button, repair API rejection.
+- Simulated-Host run: real button click sends exactly one SDK request; progress/result rendered; completion reruns checks and retains unresolved failure. The fixture does not execute an agent or change dependencies.
+- Desktop 1400px and mobile 390px screenshots inspected. Mobile DOM measurements show no document or preflight-row overflow. Browser console errors/warnings: 0.
+- No real Host agent execution, paid ASR/LLM call, BLE scan/connection, or macOS hardware run was performed.
+
+Reproduce with an existing Python environment:
+
+```powershell
+uv venv --python 3.12 .workbench/test-python
+uv pip install --python .workbench/test-python bleak memotalk-sdk
+$env:MEMOTALK_TEST_PYTHON = Join-Path (Get-Location) '.workbench/test-python/Scripts/python.exe'
+pnpm test
+pnpm exec node --import tsx --test tests/platform.test.ts tests/preflight.test.ts
+$env:OPENMINUTES_ROOT = (Get-Location).Path
+$env:OPENMINUTES_VERIFY_SCRIPTS = 'C:/Users/unknown/orca/workspaces/openminutes/pstack/.claude/skills/verify-openminutes/scripts'
+node "$env:OPENMINUTES_VERIFY_SCRIPTS/build.mjs"
+node tests/e2e-preflight.mjs
+```
+
+Evidence is retained under `.workbench/verify-evidence/preflight-*/`, including
+before/after screenshots, ARIA, mobile layout measurements, API results and
+simulated Host request payloads. Scratch instances are stopped and removed.
+
+## Authorization and operational limits
+
+The manifest adds `agent`; updating/reopening the app may require the user to
+authorize that capability in Floatboat. Capability enumeration is read-only,
+and actual call authorization is checked by Host. Only a user button click
+starts a repair task, which may consume the configured agent model's quota.
+No startup agent task is sent. Prompt restrictions do not replace Host
+authorization/sandbox controls. System-level changes require separate user
+confirmation; privacy permissions cannot be automated.
+
+Preflight and repair status are process-local caches, not a durable task queue.
+Reloading the page retains the state; restarting the application loses local
+repair tracking. A task may still exist in Host after a workbench restart:
+check Floatboat before submitting another repair. Ambiguous submissions within
+one process are not retried blindly.
