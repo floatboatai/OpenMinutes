@@ -12,7 +12,7 @@
 
 录音笔的典型困境：素材每天在增长，但你听不回去、也找不回来。
 
-这个工作台把「导入 → 转录 → 归类 → 检索」做成一条闭环流水线，每条录音在列表上都有明确阶段标签（待拉取 / 待转录 / 转录中 / 待归类 / 归类中 / 已归档 / 失败），批量操作按当前筛选执行。
+这个工作台把「导入 → 转录 → 归类 → 检索」做成一条闭环流水线，每条录音在列表上都有明确阶段标签（待拉取 / 待转录 / 转录中 / 待归类 / 归类中 / 已归档 / 失败），批量操作按勾选的录音执行。
 
 ## 功能
 
@@ -23,8 +23,9 @@
 | AI 归类 | Host LLM 结构化输出标题、摘要、分类、标签、要点、待办、重要度，并支持人工修正 |
 | 检索复盘 | 全文搜索（正文 + 标题 + 摘要）、分类/标签/阶段筛选、时间排序、批量处理 |
 | 详情播放 | HTTP Range 分段播放、按句时标跳转，转录全文、AI 结论与执行记录分区展示 |
-| 分类管理 | 新增、就地改名、改色、删除 |
-| 设备接入页 | 环境自检（Python / `bleak` / SDK / `ffmpeg`）、路径设置、SDK 指令参考库、手动登记 |
+| 分类管理 | 新增、就地改名、改色、删除自定义分类；内置分类不能删除 |
+| 设备接入页 | 环境自检（Python / `bleak` / SDK / `ffmpeg`）、导入目录设置、SDK 指令参考库、手动登记 |
+| 实时字幕 | 设备音频流经 Host ASR 实时识别，停止后保存录音及已有转录文本 |
 
 ## 快速上手
 
@@ -73,19 +74,33 @@ SDK 会自动安装 `bleak`；无需克隆 SDK 源码或配置 SDK 目录。
 src/
   contracts/       跨端 DTO（app.ts）与不可信输入校验（input.ts）
   server/          Node 服务端：装配、路由、领域逻辑
+    index.ts       服务装配与自动重连启动
     routes/        按领域拆分的 HTTP 路由
+    app-route.ts   应用信息、概览与标签列表路由
     http.ts        统一 { ok, data | error } 信封与错误码映射
     sql.ts         node:sqlite 薄封装、设置读写、任务记录
+    repo.ts        录音、分类、标签与概览查询
+    library.ts     录音库根目录、月目录与历史音频路径解析
     ingest.ts      目录扫描、清单登记、去重与命名冲突处理
+    pull.ts        BLE 下载暂存、挂接入库与待拉取文件处理
+    auto-connect.ts 后台设备探测与可选的自动拉取
     media.ts       ffmpeg 探测、时长解析、PCM16 分帧
     transcribe.ts  Host ASR 会话：参数降级、推流、续传、错误归类
     organize.ts    Host LLM 结构化归类与文本回退
     pipeline.ts    转录/归类状态机与重试
+    jobs.ts        任务调度与导入/拉取后的自动转录
+    queue.ts       串行后台任务队列
     bridge.ts      memotalk-sdk Python API 桥接（固定参数，不接受拼接命令）
+    sdk-script.ts  SDK 状态、清单、下载操作的 Python 脚本
+    live.ts        实时音频采集、文件落盘与会话保存
+    live-asr.ts    按需开启的实时 ASR 会话与推流
+    live-script.ts SDK 实时音频流的 Python 脚本
   ui/              React 界面：概览 / 录音库 / 详情 / 设备 / 分类 / 实时 / 设置
 migrations/        只追加的 SQLite 迁移
-sdk/               @floatboat/workbench-sdk 契约与类型（Host 提供）
+sdk/               Host 提供的 Workbench 运行时、客户端、契约与类型
 tests/             服务端测试
+manifest.json      Host 入口、构建配置、能力与 audio 资源声明
+index.html         UI 构建入口
 ```
 
 配套文档（中文）：[需求](REQUIREMENTS.md)、[工程约定](ENGINEERING.md)、[设计](DESIGN.md)。
@@ -104,30 +119,55 @@ tests/             服务端测试
 
 解析 `import_dir` 时，空值回落到默认目录；系统临时目录内的路径会被替换为默认目录并写回设置。扫描请求显式传入 `directory` 时则直接使用并保存该路径，不经过临时目录回退。
 
+## 设置
+
+设置页编辑路径、自动化与识别选项，设备页只编辑 `import_dir`。`PATCH /api/settings` 接收 `{ "values": { "key": "value" } }`，所有值必须是字符串。
+
+| 设置键 | 行为与默认值 |
+| --- | --- |
+| `library_dir`, `import_dir` | 默认空值，按上文规则解析；各最多 500 字符 |
+| `python_path`, `ffmpeg_path` | 默认空值，自动探测；各最多 500 字符 |
+| `auto_transcribe`, `auto_analyze` | 导入/拉取后自动转录、转录后自动归类；均默认 `"1"` |
+| `auto_connect`, `auto_pull` | 后台探测设备、自动连接成功后下载待拉取文件；均默认 `"1"` |
+| `auto_connect_minutes` | `"1"` 到 `"120"` 的整数字符串，默认 `"3"` |
+| `speaker_diarization` | 文件转录的说话人分离，默认 `"1"` |
+| `asr_hotwords` | 文件转录热词，默认空值，最多 300 字符 |
+| `asr_language` | 最多 20 字符；界面提供自动（空值）、`zh`、`en`、`ja`。目前只写入文件转录的结果元数据，未传给 ASR |
+| `device_serial` | 最多 64 字符；由设备操作或 API 保存，不是设置页字段 |
+
+开关只接受 `"0"` 或 `"1"`。后台探测在工作台服务运行期间执行；手动读取设备状态不会触发自动拉取。实时 ASR 当前使用固定 PCM 参数，不读取文件转录的热词、语言或说话人设置。`GET /api/settings` 还可能返回运行时写入的 `last_auto_connect_at`、`last_auto_pull_at`，这两项不能通过 PATCH 修改。已移除的 `sdk_dir` 在读取时隐藏、写入时忽略，其他未知键会被拒绝。
+
 ## API 速览
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/api/recordings` | 列表：搜索 / 阶段 / 分类 / 标签 / 排序 / 分页 |
+| `GET` | `/api/app` | 应用名称与版本 |
+| `GET` | `/api/overview` | 录音统计、设备状态与概览数据 |
+| `GET` | `/api/tags` | 用于筛选的标签名称列表 |
+| `GET` | `/api/recordings` | 列表：搜索 / 阶段 / 分类 / 标签 / 收藏 / 归档筛选 / 排序 / 分页 |
 | `GET` | `/api/recordings/:id` | 详情（元数据 + 转录 + AI 结论 + 执行记录） |
-| `PATCH` | `/api/recordings/:id` | 人工修正标题、分类、标签、重要度 |
+| `GET` | `/api/recordings/:id/tags` | 单条录音的标签 ID 与名称 |
+| `PATCH` | `/api/recordings/:id` | 人工修正标题、摘要、分类、标签、重要度、收藏与归档标记 |
 | `DELETE` | `/api/recordings/:id` | 删除录音，尝试将音频移入 `<library_dir>/_trash/<毫秒时间戳>-<原存储文件名>` |
 | `GET` | `/api/recordings/:id/audio` | 音频流，HTTP Range（206 + `content-range`，越界 416） |
 | `POST` | `/api/recordings/:id/export` | 默认复制音频到 `import_dir`，可用请求体字段 `directory` 覆盖目标目录 |
 | `POST` | `/api/recordings/:id/transcribe` | 单条转录 |
 | `POST` | `/api/recordings/:id/organize` | 单条 AI 归类 |
-| `POST` | `/api/recordings/batch/transcribe`, `/api/recordings/batch/organize` | 批量转录 / 批量归类 |
+| `POST` | `/api/recordings/batch/transcribe`, `/api/recordings/batch/organize` | 按请求体 `ids` 排队转录或归类，跳过不符合条件的录音 |
 | `GET` | `/api/ingest/directory` | 读取导入目录信息 |
 | `POST` | `/api/ingest/directory/ensure` | 创建导入目录 |
 | `POST` | `/api/ingest/scan` | 扫描导入目录 |
 | `POST` | `/api/ingest/manifest` | 登记设备清单条目 |
-| `GET` | `/api/device`, `/api/device/summary`, `/api/device/capabilities` | 设备记录、概览、SDK 指令参考库 |
+| `GET` | `/api/device` | 环境自检、SDK 指令参考库、Host 能力摘要、设备记录与设置 |
+| `GET` | `/api/device/summary` | 设备/本地录音数及设备/分类数 |
+| `GET` | `/api/device/capabilities` | Host ASR/LLM 操作的可用性，不是 BLE 指令 |
+| `DELETE` | `/api/device/:id` | 删除本机设备记录并清空匹配的已存序列号，不删除录音或设备文件 |
 | `POST` | `/api/device/check`, `/api/device/list`, `/api/device/download`, `/api/device/status` | 环境自检、读清单、BLE 拉取、状态 |
 | `GET` | `/api/live` | 实时字幕状态 |
 | `POST` | `/api/live/start`, `/api/live/stop` | 开始或停止实时字幕 |
 | `GET`, `POST` | `/api/categories` | 列出或新增分类 |
 | `PATCH`, `DELETE` | `/api/categories/:id` | 修改或删除分类 |
-| `GET`, `PATCH` | `/api/settings` | 路径、转录与归类开关、热词与语言 |
+| `GET`, `PATCH` | `/api/settings` | 读取设置，或修改上文列出的可写设置键 |
 
 JSON 响应统一为 `{ ok: true, data }` / `{ ok: false, error: { code, message } }` 信封。音频接口成功时返回音频流。
 
