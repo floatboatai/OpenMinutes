@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { parseStatus, probeSdk } from '../src/server/bridge.ts';
+import { parseStatus, probeSdk, pythonRuntimeEnv } from '../src/server/bridge.ts';
 import { SDK_ACTION_SCRIPT } from '../src/server/sdk-script.ts';
 import { LIVE_CAPTION_SCRIPT } from '../src/server/live-script.ts';
 
@@ -29,6 +29,18 @@ function execute(script: string, args: string[] = [], prefix = setup) {
 
 test('missing Python reports SDK unavailable', async () => {
   assert.equal((await probeSdk(null)).ok, false);
+});
+
+test('Windows BLE backend imports in the application Python environment', {
+  skip: !python || process.platform !== 'win32',
+}, async () => {
+  assert.ok(python);
+  const env = await pythonRuntimeEnv(python);
+  const result = spawnSync(python, ['-c',
+    'from bleak.backends.winrt.client import BleakClientWinRT; from bleak.backends.winrt.scanner import BleakScannerWinRT; print("OK")',
+  ], { encoding: 'utf8', timeout: 15000, ...(env ? { env } : {}) });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'OK');
 });
 
 test('installed package is probed using the selected interpreter', simulated, async () => {
