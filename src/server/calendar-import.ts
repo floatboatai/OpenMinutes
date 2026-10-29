@@ -1,4 +1,4 @@
-import ical, { type ParameterValue } from 'node-ical';
+import ical, { type DateWithTimeZone, type ParameterValue } from 'node-ical';
 import type { DatabaseSync } from 'node:sqlite';
 import type { CalendarEventInput } from '../contracts/calendar';
 import { BadInput } from '../contracts/input';
@@ -6,6 +6,15 @@ import { saveCalendarEvent } from './calendar';
 
 function text(value: ParameterValue | undefined): string {
   return typeof value === 'string' ? value : value?.val ?? '';
+}
+
+function dateOnlyIso(date: DateWithTimeZone): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: date.tz || Intl.DateTimeFormat().resolvedOptions().timeZone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const part = (name: string) => parts.find((item) => item.type === name)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}T00:00:00.000Z`;
 }
 
 export function parseCalendarFile(content: string, source: string): Array<{ uid: string; input: CalendarEventInput }> {
@@ -33,7 +42,9 @@ export function parseCalendarFile(content: string, source: string): Array<{ uid:
       uid: event.uid,
       input: {
         summary: text(event.summary) || '未命名事件', description: text(event.description),
-        location: text(event.location), startTime: event.start.toISOString(), endTime: end.toISOString(),
+        location: text(event.location),
+        startTime: allDay ? dateOnlyIso(event.start) : event.start.toISOString(),
+        endTime: allDay ? dateOnlyIso(end) : end.toISOString(),
         allDay, source,
         attendees: attendees.map((attendee) => typeof attendee === 'string'
           ? attendee.replace(/^mailto:/i, '')

@@ -222,8 +222,8 @@ export function CalendarPage() {
                 <small>{recording.recordedAt ? new Date(recording.recordedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '录音时间未知'} · {formatDuration(recording.durationSec)}</small>
                 <small>{recording.calendarEventId ? '已关联事件' : '未关联事件'}</small></span>
             </button>
-            <RecordingLinkSlot recording={recording} events={events.data ?? []} onChanged={refresh} />
-            {!recording.calendarEventId ? <CalendarAssociation id={recording.id} eventId={null} onChanged={refresh} /> : null}
+            <RecordingLinkSlot recording={recording} events={events.data ?? []} onChanged={() => { setPanel({ kind: 'empty' }); refresh(); }} />
+            {!recording.calendarEventId ? <CalendarAssociation id={recording.id} eventId={null} onChanged={() => { setPanel({ kind: 'empty' }); refresh(); }} /> : null}
           </div>)}
       </section>
       <aside className="calendar-results" aria-label="转录与纪要">
