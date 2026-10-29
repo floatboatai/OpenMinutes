@@ -13,4 +13,6 @@
 - `cmd | grep …` 的退出码是 grep 的，不是 cmd 的：只要 grep 匹配到 `FAIL` 行就算成功，`&&` 会照样往下走。需要按命令成败串联时，用 `return ${PIPESTATUS[0]}` 包一层，或者不要接管道。
 - 主 checkout `C:/Users/unknown/orca/openminutes` 默认没有 `node_modules`，在里面直接跑 `build.mjs` 会报 `Cannot find module 'lucide-react'`。这是环境问题，先 `pnpm install`，或者在已经装好依赖的 worktree 里验证同一个 tree（用 `git rev-parse <ref>^{tree}` 比对）。
 - 本地 main 和 origin/main 可能是同一份内容、但历史不同（远端被整理成了线性历史，SHA 不一样）。推送前先 `git merge-base --is-ancestor origin/main main`，失败时用 `git diff origin/main <本地提交>` 判断内容是否相同。不要强推。
+- 在 Windows 上 kill 服务进程后立刻打开它的 `data.sqlite` 写入，可能报 `disk I/O error`（文件句柄还没释放）。直接改库来模拟崩溃时，写库要带重试（例如每 500ms 一次、最多 20 次）。
+- GitHub 网络偶尔出现 EOF 或 TLS 握手超时。`gh pr create` 失败后，先用 `gh pr list --head <branch> --state all` 确认 PR 没有建成再重试，避免重复开 PR。
 - 独立启动的服务不能把导入目录放在系统临时目录（`%TEMP%`），否则应用会把它改回真实的 `~/memo/memotalk/inbox`。scratch 数据放在 `.workbench/` 下（已被 gitignore）。
