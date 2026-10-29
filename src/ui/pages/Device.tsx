@@ -143,6 +143,7 @@ export function DevicePage({ onNavigate }: Props) {
       if (result.registered > 0) {
         state.reload();
         directory.reload();
+        pendingList.reload();
       }
     } catch (error) {
       toast.push(errorText(error), 'error');
