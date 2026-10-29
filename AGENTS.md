@@ -1,8 +1,14 @@
-# CLAUDE.md
+# AGENTS.md
+
+本仓库的 agent 规则与避坑记录只写在这个文件里，不新建 `CLAUDE.md`。
 
 ## 验证
 
 - 要证明页面或接口行为可用时，使用 `.claude/skills/verify-openminutes`（build → launch → doctor → browse → cleanup）。它会把实例隔离在 `.workbench/verify/<runId>/`，不会碰 Floatboat 里的真实数据。
+
+## Worktree
+
+- 分支合并后立即清理对应的 worktree（`orca worktree rm --worktree <id> --force`）。清理前用 `git cherry origin/main <branch>` 确认没有未合并的提交（只出现 `-` 行）；如果出现 `+`，再用 tree 或文件 diff 确认内容是否已经在 main 里（rebase 合并后 SHA 会变）。
 
 ## Shell 避坑
 
