@@ -27,7 +27,7 @@ export function dependencyChecks(env: DeviceEnv): PreflightItem[] {
     id, label, status: probe.ok ? 'ok' : 'fail', reason: probe.detail, autoRepair: !probe.ok,
     action: probe.ok ? '' : id === 'ffmpeg'
       ? '安装用户级 ffmpeg，或在设置中填写已安装的 ffmpeg 绝对路径；系统级安装需先确认。'
-      : '在本应用目录用 uv run --python 3.12 --with bleak --with memotalk-sdk python -c "import sys; print(sys.executable)" 准备环境，将输出的解释器路径填入设置，再重新检测。',
+      : '在本应用目录执行 uv venv --python 3.12 .venv，再执行 uv pip install --python .venv bleak memotalk-sdk（已有 .venv 不要覆盖）。用 uv run --no-project --python .venv python -c "import bleak, memotalk" 验证，再重新检测；自定义解释器需在设置中切换。',
   }));
 }
 
@@ -111,9 +111,10 @@ export async function decodeCheck(ffmpeg: string | null): Promise<PreflightItem>
   const base: PreflightItem = { id: 'decode', label: '音频解码', status: 'fail', reason: '缺少 ffmpeg', autoRepair: true,
     action: '安装支持 WAV/PCM 和 MP3 解码的 ffmpeg，并在设置中填写路径。' };
   if (!ffmpeg) return base;
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'openminutes-decode-'));
-  const file = path.join(directory, 'probe.wav');
+  let directory: string | null = null;
   try {
+    directory = await mkdtemp(path.join(os.tmpdir(), 'openminutes-decode-'));
+    const file = path.join(directory, 'probe.wav');
     const wav = Buffer.alloc(44 + 3200);
     wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
     wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
@@ -122,9 +123,14 @@ export async function decodeCheck(ffmpeg: string | null): Promise<PreflightItem>
     await writeFile(file, wav);
     const result = await verifyDecodable(ffmpeg, file);
     return { ...base, status: result.ok ? 'ok' : 'fail', reason: result.message, autoRepair: !result.ok, action: result.ok ? '' : base.action };
+  } catch (error) {
+    return { ...base, reason: `无法完成解码检查：${String(error)}`, autoRepair: false,
+      action: '检查系统临时目录是否可写及磁盘剩余空间，然后重新检测。' };
   } finally {
-    await unlink(file).catch(() => undefined);
-    await rmdir(directory);
+    if (directory) {
+      await unlink(path.join(directory, 'probe.wav')).catch(() => undefined);
+      await rmdir(directory).catch(() => undefined);
+    }
   }
 }
 

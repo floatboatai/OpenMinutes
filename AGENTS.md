@@ -7,3 +7,4 @@
 - Verification uses an isolated checkout-local data directory. Do not modify or copy `.claude/skills/verify-openminutes`.
 - In PowerShell, check `Test-Path` before reading optional files (this checkout initially had no AGENTS.md).
 - Run independent shell reads separately, not with semicolon command chains. Pass complex browser steps through a JSON file, not nested shell quoting.
+- Do not persist `sys.executable` from `uv run --with ...`: it can point to an ephemeral environment removed at exit (observed ENOENT in SDK tests). Create a checkout-local environment with `uv venv`, install with `uv pip --python`, and run Python checks with `uv run --python <venv>`.

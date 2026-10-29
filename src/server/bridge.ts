@@ -56,7 +56,7 @@ export function parseStatus(stdout: string): DeviceStatus | null {
 
 export async function probePython(configured: string): Promise<{ probe: EnvProbe; command: string | null }> {
   const managed = await uvPythonCandidates();
-  const candidates = [...new Set([configured, ...managed, ...pythonCandidates(configured)].filter(Boolean))];
+  const candidates = [...new Set([...pythonCandidates(configured), ...managed].filter(Boolean))];
   for (const candidate of candidates) {
     const outcome = await runCommand(candidate, ['-c',
       'import sys;print(sys.executable);print("Python "+sys.version.split()[0]);sys.exit(0 if sys.version_info >= (3,10) else 1)',

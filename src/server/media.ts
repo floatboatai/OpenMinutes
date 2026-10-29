@@ -72,9 +72,6 @@ export interface ToolProbe {
   resolvedPath: string | null;
 }
 
-/** 在 PATH 中展开可执行文件候选，兼容 Windows 扩展名。 */
-export { pathCandidates } from './tools';
-
 const DURATION_PATTERN = /Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/;
 
 /** 用 ffmpeg 的 stderr 头部信息解析时长，避免额外依赖 ffprobe。 */
@@ -155,18 +152,23 @@ export async function* decodePcmFrames(
     });
   });
 
-  while (true) {
-    if (queue.length > 0) {
-      const frame = queue.shift();
-      if (frame) yield frame;
-      continue;
+  try {
+    while (true) {
+      if (queue.length > 0) {
+        const frame = queue.shift();
+        if (frame) yield frame;
+        continue;
+      }
+      if (finished) break;
+      await new Promise((resolve) => setTimeout(resolve, 12));
     }
-    if (finished) break;
-    await new Promise((resolve) => setTimeout(resolve, 12));
-  }
 
-  if (pending.length > 0 && !failure) yield pending;
-  return failure;
+    if (pending.length > 0 && !failure) yield pending;
+    return failure;
+  } finally {
+    if (!finished) terminateChild(child);
+    await done;
+  }
 }
 
 /** 读取解码结果，验证音频确实能转成 PCM（导入时做一次轻量可用性检查）。 */

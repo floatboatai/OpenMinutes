@@ -2,6 +2,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { runCommand } from './media';
 
 export interface ToolContext {
@@ -13,7 +14,8 @@ export interface ToolContext {
 }
 
 export function toolContext(): ToolContext {
-  return { platform: process.platform, env: process.env, execPath: process.execPath, home: os.homedir(), cwd: process.cwd() };
+  return { platform: process.platform, env: process.env, execPath: process.execPath, home: os.homedir(),
+    cwd: fileURLToPath(new URL('../../', import.meta.url)) };
 }
 
 export function pathApi(platform: NodeJS.Platform) {
