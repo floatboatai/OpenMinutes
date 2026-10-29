@@ -27,7 +27,12 @@
 ## 持久化对象
 
 `devices`、`recordings`、`transcripts`、`analyses`、`categories`、`tags`、`recording_tags`、`job_runs`、`sdk_commands`、`settings`。
-音频文件存放在数据资源 `audio`（`app.resources.path('audio', …)`），业务库只保存相对文件名；删除录音时文件移动到 `audio/_trash`。
+
+- `library.ts` 统一录音库位置与路径解析。`library_dir` 默认 `~/memo/memotalk/raw`；目录导入与设备下载复制到 `<library_dir>/<yyyy-MM>/`，实时录音也写入月目录。月份使用本地时区，录制时间无法解析时回退到当前月份。
+- 新版 `recordings.storage_path` 保存完整目标路径，默认目录或绝对路径配置下为绝对路径。目录配置应使用绝对路径或 `~/...`；当前设置校验并不拒绝相对路径。历史相对文件名由 `resolveAudioFile` 从 Host 数据资源 `audio` 解析，`resolveStoredPath` 则使用调用方提供的兜底目录。修改 `library_dir` 不会迁移已有文件或重写其路径。
+- BLE 下载先暂存到 `app.resources.path('audio', '_incoming', 'write')`，再复制进录音库；`import_dir` 不是 BLE 暂存目录。目录扫描只处理当前层支持的音频文件，不递归，且保留来源文件。
+- 删除录音时尝试 `rename` 到当前 `<library_dir>/_trash/<毫秒时间戳>-<原存储文件名>`。无论移动是否成功，随后都会删除录音、转录、分析、标签关联、任务记录并清理孤立标签；移动失败返回 `audioMovedToTrash: null`。没有恢复接口，不应把回收站视为完整的数据备份。
+- `POST /api/recordings/:id/export` 只复制音频，默认目标为解析后的 `import_dir`（默认 `~/memo/memotalk/inbox`），请求体 `directory` 可覆盖目标。目录自动创建，文件使用原始 `filename`，同名目标可能被覆盖；不存在独立的导出目录设置。
 
 ## 外部副作用
 
@@ -53,7 +58,7 @@
 - LLM 优先 `generateObject`；若服务端拒绝该 JSON Schema，回退 `generateText` 并本地抽取 JSON，再做字段收敛与分类枚举校验。
 - 实时字幕的识别会话**按需开启**：只在收到第一帧 PCM 时才 `asr.start`，避免连接/等待阶段空转到 60 秒被服务端回收；会话被回收或上游异常时自动重建（连续失败 4 次熔断并提示重开）。
 - 工具路径（python/ffmpeg）按「设置值 → Floatboat 内置工具 → PATH → 命令名」探测，避免依赖进程 PATH。
-- 导入目录（`import_dir`）为空、或落在系统临时目录时，一律回落到默认收件目录 `~/memo/memotalk/inbox` 并把默认值写回设置；扫描前若目录不存在则先创建，不再抛「目录不存在」。
+- `resolveImportDir` 在 `import_dir` 为空或位于系统临时目录时回落到 `~/memo/memotalk/inbox`；只有非空的临时目录配置会被写回默认值。`POST /api/ingest/scan` 显式传入 `directory` 时直接使用并保存该路径，不经过这项回退；`/api/ingest/directory/ensure` 则在保存后重新解析目录。扫描前若目录不存在会先创建，创建失败报告 `DIR_NOT_CREATABLE`。
 
 ## 已知边界
 
