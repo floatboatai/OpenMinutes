@@ -862,7 +862,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 
 /* ---------------------------------------------------------------- 设备页 */
 
-.device-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; align-items: start; }
+.device-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 14px; align-items: start; }
 
 .env { display: flex; flex-direction: column; }
 .env__row { display: grid; grid-template-columns: 8px 72px minmax(0, 1fr) 48px; align-items: center; gap: 9px; padding: 8px 0; border-bottom: 1px solid var(--app-border); font-size: 12.5px; }
@@ -995,3 +995,11 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 .env__action { grid-column: 2 / -1; font-size: 12px; overflow-wrap: anywhere; }
 .environment-repair pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; }
 .environment-repair .muted { overflow-wrap: anywhere; }
+.environment-panel { grid-column: 1 / -1; min-width: 0; }
+.environment-panel .env__row { grid-template-columns: 8px 120px minmax(0, 1fr) 48px; }
+@media (max-width: 560px) {
+  .environment-panel .card__header { flex-wrap: wrap; }
+  .environment-panel .env__row { grid-template-columns: 8px minmax(0, 1fr) 48px; }
+  .environment-panel .env__state { grid-column: 3; grid-row: 1; }
+  .environment-panel .env__detail, .environment-panel .env__action { grid-column: 2 / -1; }
+}

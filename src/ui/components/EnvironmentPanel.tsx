@@ -50,7 +50,7 @@ export function EnvironmentPanel({ revision }: { revision: number }) {
   const available = state?.report.items.find((item) => item.id === 'host-agent')?.status === 'ok';
   const fixable = state?.report.items.some((item) => item.status === 'fail' && item.autoRepair);
   const running = state?.repair.status === 'running' || state?.repair.status === 'starting';
-  return <Card title="本机环境" action={<span className="muted">{state ? `检测于 ${formatDateTime(state.report.checkedAt)}` : '正在检测'}</span>}>
+  return <div className="environment-panel"><Card title="本机环境" action={<span className="muted">{state ? `检测于 ${formatDateTime(state.report.checkedAt)}` : '正在检测'}</span>}>
     {error ? <p className="notice" role="alert">{error}</p> : null}
     <ul className="env">
       {state?.report.items.map((item) => <li key={item.id} className={`env__row env__row--${item.status}`} data-preflight-id={item.id}>
@@ -70,5 +70,5 @@ export function EnvironmentPanel({ revision }: { revision: number }) {
       <pre>{state.repair.text}</pre>
       {state.repair.runId ? <p className="muted">Host 任务：{state.repair.runId}</p> : null}
     </section> : null}
-  </Card>;
+  </Card></div>;
 }
