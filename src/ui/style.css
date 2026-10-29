@@ -870,7 +870,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 .env__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tone-danger); }
 .env__row--ok .env__dot { background: var(--tone-success); }
 .env__label { font-weight: 600; }
-.env__detail { color: var(--app-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.env__detail { color: var(--app-muted); overflow-wrap: anywhere; min-width: 0; }
 .env__state { text-align: right; color: var(--tone-danger); font-size: 11.5px; }
 .env__row--ok .env__state { color: var(--tone-success); }
 
@@ -988,3 +988,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+.env__row--warn .env__dot { background: #a36800; }
+.env__row--fail .env__dot { background: #c53434; }
+.env__row--warn .env__state { color: #875500; }
+.env__row--fail .env__state { color: #b52020; }
+.env__action { grid-column: 2 / -1; font-size: 12px; overflow-wrap: anywhere; }
+.environment-repair pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; }
+.environment-repair .muted { overflow-wrap: anywhere; }
