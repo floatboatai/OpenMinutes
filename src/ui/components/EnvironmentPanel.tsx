@@ -8,6 +8,7 @@ import { formatDateTime } from '../format';
 const statusText = { ok: '就绪', warn: '待确认', fail: '失败' };
 const repairText = {
   idle: '尚未请求修复', starting: '正在提交', running: '修复中',
+  recovering: '正在恢复上次修复', unknown: '修复结果未知，已禁止重复提交',
   completed: '任务已结束', failed: '任务失败', cancelled: '任务已取消', interrupted: '任务已中断',
 };
 
@@ -49,7 +50,7 @@ export function EnvironmentPanel({ revision }: { revision: number }) {
   };
   const available = state?.report.items.find((item) => item.id === 'host-agent')?.status === 'ok';
   const fixable = state?.report.items.some((item) => item.status === 'fail' && item.autoRepair);
-  const running = state?.repair.status === 'running' || state?.repair.status === 'starting';
+  const running = state !== null && ['running', 'starting', 'recovering', 'unknown'].includes(state.repair.status);
   return <div className="environment-panel"><Card title="本机环境" action={<span className="muted">{state ? `检测于 ${formatDateTime(state.report.checkedAt)}` : '正在检测'}</span>}>
     {error ? <p className="notice" role="alert">{error}</p> : null}
     <ul className="env">
@@ -69,6 +70,7 @@ export function EnvironmentPanel({ revision }: { revision: number }) {
       <p>{repairText[state.repair.status]}</p>
       <pre>{state.repair.text}</pre>
       {state.repair.runId ? <p className="muted">Host 任务：{state.repair.runId}</p> : null}
+      <p className="muted">任务键：{state.repair.idempotencyKey}</p>
     </section> : null}
   </Card></div>;
 }

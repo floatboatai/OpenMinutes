@@ -16,7 +16,7 @@ export interface PreflightReport {
 
 export type RepairState =
   | { status: 'idle' }
-  | { status: 'starting' | 'running'; idempotencyKey: string; runId: string | null; text: string }
+  | { status: 'starting' | 'running' | 'recovering' | 'unknown'; idempotencyKey: string; runId: string | null; text: string }
   | { status: 'completed' | 'failed' | 'cancelled' | 'interrupted'; idempotencyKey: string; runId: string | null; text: string };
 
 export interface EnvironmentState {

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { openWorkbenchDatabase } from '../sdk/database.mjs';
 import { checkMobile } from './mobile-preflight.mjs';
 
-const root = fileURLToPath(new URL('../', import.meta.url));
+const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const scripts = process.env.OPENMINUTES_VERIFY_SCRIPTS;
 assert.ok(scripts, 'Set OPENMINUTES_VERIFY_SCRIPTS to the existing verify-openminutes/scripts directory');
 const manifest = JSON.parse(await readFile(path.join(root, 'manifest.json'), 'utf8'));
@@ -43,6 +43,7 @@ for (const simulated of [false, true]) {
   await db.close();
   const requests = [];
   let polls = 0;
+  let recoveryMode = simulated ? 'running' : null;
   const host = createServer(async (request, response) => {
     let body = '';
     for await (const chunk of request) body += chunk;
@@ -56,8 +57,12 @@ for (const simulated of [false, true]) {
     } else if (call.domain === 'agent' && call.operation === 'start') {
       data = { runId: 'fixture-repair' };
     } else if (call.domain === 'agent' && call.operation === 'get') {
+      if (recoveryMode === 'offline') {
+        response.writeHead(503).end(JSON.stringify({ error: { code: 'FIXTURE_OFFLINE' } }));
+        return;
+      }
       polls++;
-      data = { runId: 'fixture-repair', status: polls < 2 ? 'running' : 'completed',
+      data = { runId: 'fixture-repair', status: recoveryMode === 'running' || polls < 2 ? 'running' : 'completed',
         text: '模拟 Host：未执行安装或修改。', errorCode: null };
     } else {
       response.writeHead(400).end(JSON.stringify({ error: { code: 'UNEXPECTED_FIXTURE_CALL' } }));
@@ -112,8 +117,8 @@ for (const simulated of [false, true]) {
       { click: 'text=重新检测' }, { waitText: '环境检测已刷新', timeout: 60000 },
       ...(simulated ? [
         { click: 'text=让 Floatboat 助手修复' },
-        { waitText: '任务已结束', timeout: 60000 },
-        { waitText: '已重新检测', timeout: 60000 },
+        { waitText: '修复中', timeout: 60000 },
+        { waitText: '模拟 Host：未执行安装或修改。', timeout: 60000 },
         { expectText: '模拟 Host：未执行安装或修改。' },
       ] : [{ expectText: 'agent 不可用' }]),
       { aria: 'after.aria.txt' }, { screenshot: 'after.png' },
@@ -130,7 +135,57 @@ for (const simulated of [false, true]) {
       assert.equal(starts.length, 1);
       assert.equal(path.resolve(starts[0].input.workingDirectory), path.resolve(root));
       assert.ok(starts[0].input.idempotencyKey);
-      assert.equal(after.data.repair.status, 'completed');
+      assert.equal(after.data.repair.status, 'running');
+      // Stop only our child and reuse its isolated database. No actual Host is connected.
+      const exited = new Promise((resolve) => child.once('close', resolve));
+      child.kill();
+      await exited;
+      recoveryMode = 'offline';
+      log = '';
+      child = spawn(process.execPath, ['--enable-source-maps', path.join(root, manifest.server)], {
+        cwd: root, env: { ...process.env, FLOATBOAT_WORKBENCH_CONFIG: configPath },
+        windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      child.stdout.on('data', (chunk) => { log += chunk; });
+      child.stderr.on('data', (chunk) => { log += chunk; });
+      url = undefined;
+      const restartDeadline = Date.now() + 30000;
+      while (!url && Date.now() < restartDeadline) {
+        const ready = log.split('\n').find((line) => line.startsWith('{"type":"ready"'));
+        if (ready) url = JSON.parse(ready).url;
+        else await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assert.ok(url, log);
+      await writeFile(path.join(runDir, 'run.json'), JSON.stringify({
+        runId, url, pid: child.pid, nonce, root, runDir, evidenceDir, dirs, startedAt: new Date().toISOString(),
+      }));
+      await script('doctor.mjs', [runId]);
+      await writeFile(stepsPath, JSON.stringify([
+        { goto: '#/device' }, { waitText: '修复结果未知，已禁止重复提交', timeout: 60000 },
+        { eval: "(() => { const b = [...document.querySelectorAll('button')].find(b => b.textContent.includes('让 Floatboat 助手修复')); if (!b?.disabled) throw new Error('repair must be disabled'); return true; })()" },
+        { aria: 'unknown.aria.txt' }, { screenshot: 'unknown.png' },
+      ]));
+      await script('browse.mjs', [runId, 'restart-unknown', `@${stepsPath}`]);
+      const blocked = await fetch(`${url}/api/environment/repair`, { method: 'POST' }).then((response) => response.json());
+      assert.equal(blocked.data.status, 'unknown');
+      assert.equal(blocked.data.idempotencyKey, starts[0].input.idempotencyKey);
+      recoveryMode = 'running';
+      await writeFile(stepsPath, JSON.stringify([
+        { goto: '#/device' }, { waitText: '修复中', timeout: 60000 },
+        { aria: 'running.aria.txt' }, { screenshot: 'running.png' },
+      ]));
+      await script('browse.mjs', [runId, 'restart-running', `@${stepsPath}`]);
+      recoveryMode = 'completed';
+      await writeFile(stepsPath, JSON.stringify([
+        { goto: '#/device' }, { waitText: '已重新检测', timeout: 60000 },
+        { aria: 'completed.aria.txt' }, { screenshot: 'completed.png' },
+      ]));
+      await script('browse.mjs', [runId, 'restart-completed', `@${stepsPath}`]);
+      const recovered = await fetch(`${url}/api/environment`).then((response) => response.json());
+      assert.equal(recovered.data.repair.status, 'completed');
+      assert.equal(recovered.data.repair.idempotencyKey, starts[0].input.idempotencyKey);
+      assert.equal(requests.filter((call) => call.domain === 'agent' && call.operation === 'start').length, 1);
+      await writeFile(path.join(evidenceDir, 'recovered.json'), JSON.stringify(recovered, null, 2));
     } else {
       const denied = await fetch(`${url}/api/environment/repair`, { method: 'POST' }).then((response) => response.json());
       assert.equal(denied.ok, false);

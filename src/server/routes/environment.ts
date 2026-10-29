@@ -3,6 +3,7 @@ import { api } from '../http';
 import { appPreflight } from '../preflight';
 import { createEnvironmentRepair } from '../environment-repair';
 import { toolContext } from '../tools';
+import { sqliteRepairStore } from '../repair-store';
 
 export function registerEnvironmentRoutes(app: WorkbenchServer) {
   const preflight = appPreflight(app);
@@ -14,6 +15,7 @@ export function registerEnvironmentRoutes(app: WorkbenchServer) {
       return (await preflight.get(refresh)).report;
     },
     workingDirectory: toolContext().cwd,
+    store: sqliteRepairStore(app.database, toolContext().cwd),
   });
   app.route('GET', '/api/environment', api(async () => ({
     report: (await preflight.get()).report,

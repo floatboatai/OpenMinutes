@@ -67,7 +67,7 @@ $env:MEMOTALK_TEST_PYTHON = Join-Path (Get-Location) '.workbench/test-python/Scr
 pnpm test
 pnpm exec node --import tsx --test tests/platform.test.ts tests/preflight.test.ts
 $env:OPENMINUTES_ROOT = (Get-Location).Path
-$env:OPENMINUTES_VERIFY_SCRIPTS = 'C:/Users/unknown/orca/workspaces/openminutes/pstack/.claude/skills/verify-openminutes/scripts'
+$env:OPENMINUTES_VERIFY_SCRIPTS = 'C:/Users/unknown/orca/workspaces/openminutes/pstack-review-fix/.claude/skills/verify-openminutes/scripts'
 node "$env:OPENMINUTES_VERIFY_SCRIPTS/build.mjs"
 node tests/e2e-preflight.mjs
 ```
@@ -86,8 +86,42 @@ No startup agent task is sent. Prompt restrictions do not replace Host
 authorization/sandbox controls. System-level changes require separate user
 confirmation; privacy permissions cannot be automated.
 
-Preflight and repair status are process-local caches, not a durable task queue.
-Reloading the page retains the state; restarting the application loses local
-repair tracking. A task may still exist in Host after a workbench restart:
-check Floatboat before submitting another repair. Ambiguous submissions within
-one process are not retried blindly.
+Preflight reports are process-local caches. Repair intent, idempotency key,
+run ID and state are now persisted in SQLite, keyed by working directory
+(`0005_environment_repair.sql`). The intent commits before `agent.start`.
+Restarting only queries the saved task, using its run ID or original key;
+it never starts or resubmits a repair automatically. A missing result or
+failed query stays `unknown`, blocks new submissions and retains its key.
+The UI distinguishes recovery from unknown results and displays both IDs.
+Only a confirmed terminal Host result allows a later explicit new repair.
+Corrupt journals fail closed. A crash before submission can leave an intent
+whose execution cannot be proven: this intentionally remains blocked until
+the Host can return a result, rather than risking duplicate mutations.
+
+Tasks submitted by older versions before this journal existed cannot be
+reconstructed retroactively. Check Floatboat for any such task before the
+first repair after upgrading. No real Host/OS permission boundary has changed.
+
+## PR #9 review fixes
+
+- All Python text probe boundaries now use one `pythonTextEnv` helper, overriding
+  inherited `PYTHONUTF8=0` and `PYTHONIOENCODING=gbk` before the first executable
+  or user-site query, not merely before later SDK calls.
+- A real Python regression first reproduces corrupted Chinese output through
+  `runCommand`, then verifies a Chinese-named venv executable and Chinese
+  `PYTHONUSERBASE` resolve exactly under the same legacy environment.
+- `pnpm test`: 80 passed, 0 failed, 0 skipped using the existing isolated SDK
+  interpreter. Recovery covers four crash boundaries crossed with running,
+  completed/failed/cancelled/interrupted, query errors and missing results.
+  Additional tests prove intent commits before submission, a lost response
+  retains its original key, persistence failure cannot submit, and corrupt
+  journal data does not create a fresh task.
+- Floatboat typecheck/build passed, retaining only the existing Device.tsx
+  large-module warning.
+- Isolated browser verification uses the external `pstack-review-fix` scripts
+  without modifying or copying them. It never enables real Host mode.
+  The simulated task stays running while its workbench child process is
+  stopped and restarted against the same database. Query failure locks the
+  button and API; restoring queries recovers the original task, then its
+  terminal state triggers preflight. Exactly one `agent.start` occurs across
+  the restart. Desktop/mobile rendering and no-Host rejection are also checked.

@@ -5,20 +5,30 @@ import { createHostClient } from '../sdk/host.mjs';
 import type { PreflightReport } from '../src/contracts/preflight.ts';
 import { createEnvironmentRepair } from '../src/server/environment-repair.ts';
 import type { AgentTaskRun } from '../sdk/agent-contracts.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
+import { sqliteRepairStore } from '../src/server/repair-store.ts';
+
+function testStore(t: { after: (fn: () => void) => void }) {
+  const db = new DatabaseSync(':memory:');
+  db.exec(readFileSync(new URL('../migrations/0005_environment_repair.sql', import.meta.url), 'utf8'));
+  t.after(() => db.close());
+  return sqliteRepairStore(db, '/app');
+}
 
 const report: PreflightReport = { platform: 'darwin', arch: 'arm64', checkedAt: 'now',
   items: [{ id: 'sdk', label: 'SDK', status: 'fail', reason: 'missing', autoRepair: true, action: 'uv run' }] };
 
-test('unavailable agent cannot submit a task', async () => {
+test('unavailable agent cannot submit a task', async (t) => {
   const repair = createEnvironmentRepair({
-    host: createHostClient(undefined), report: async () => report, workingDirectory: '/app',
+    host: createHostClient(undefined), report: async () => report, workingDirectory: '/app', store: testStore(t),
   });
   await assert.rejects(repair.start(), /agent 不可用/);
   assert.equal(repair.get().status, 'idle');
   repair.dispose();
 });
 
-test('real SDK HTTP boundary submits once, carries safety context, polls and reruns checks', async () => {
+test('real SDK HTTP boundary submits once, carries safety context, polls and reruns checks', async (t) => {
   const calls: Array<{ domain: string; operation: string; input: Record<string, unknown> }> = [];
   let checks = 0;
   let gets = 0;
@@ -47,6 +57,7 @@ test('real SDK HTTP boundary submits once, carries safety context, polls and rer
   assert.ok(address && typeof address !== 'string');
   const repair = createEnvironmentRepair({
     host: createHostClient({ url: `http://127.0.0.1:${address.port}` }),
+    store: testStore(t),
     report: async (refresh) => { if (refresh) checks++; return report; }, workingDirectory: '/app', pollMs: 10,
   });
   try {
@@ -73,7 +84,7 @@ test('real SDK HTTP boundary submits once, carries safety context, polls and rer
 });
 
 for (const status of ['failed', 'cancelled', 'interrupted'] as const) {
-  test(`agent ${status} remains visible and triggers reinspection`, async () => {
+  test(`agent ${status} remains visible and triggers reinspection`, async (t) => {
     const host = createHostClient(undefined);
     host.capabilities.list = async () => ({ sdkVersion: '1', capabilities: ['start', 'get'].map((operation) => ({
       domain: 'agent', operation, declared: true, status: 'available', readOnly: false, requiresAccount: true,
@@ -86,6 +97,7 @@ for (const status of ['failed', 'cancelled', 'interrupted'] as const) {
     let refreshed = 0;
     const repair = createEnvironmentRepair({
       host, report: async (refresh) => { if (refresh) refreshed++; return report; }, workingDirectory: '/app', pollMs: 1,
+      store: testStore(t),
     });
     try {
       await repair.start();
@@ -100,7 +112,7 @@ for (const status of ['failed', 'cancelled', 'interrupted'] as const) {
   });
 }
 
-test('ambiguous submission does not allow a duplicate task when reconciliation is unavailable', async () => {
+test('ambiguous submission does not allow a duplicate task when reconciliation is unavailable', async (t) => {
   const host = createHostClient(undefined);
   host.capabilities.list = async () => ({ sdkVersion: '1', capabilities: ['start', 'get'].map((operation) => ({
     domain: 'agent', operation, declared: true, status: 'available', readOnly: false, requiresAccount: true,
@@ -109,13 +121,13 @@ test('ambiguous submission does not allow a duplicate task when reconciliation i
   let submissions = 0;
   host.agent.start = async () => { submissions++; throw new Error('connection lost after submission'); };
   host.agent.findByIdempotencyKey = async () => { throw new Error('offline'); };
-  const repair = createEnvironmentRepair({ host, report: async () => report, workingDirectory: '/app' });
+  const repair = createEnvironmentRepair({ host, report: async () => report, workingDirectory: '/app', store: testStore(t) });
   try {
     await repair.start();
     await repair.start();
     assert.equal(submissions, 1);
     const state = repair.get();
-    assert.equal(state.status, 'starting');
+    assert.equal(state.status, 'unknown');
     assert.ok('text' in state && state.text.includes('提交结果未知'));
   } finally {
     repair.dispose();

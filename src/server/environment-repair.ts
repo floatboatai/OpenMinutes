@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { HostClient } from '../../sdk/host-contracts.mjs';
 import type { PreflightReport, RepairState } from '../contracts/preflight';
 import { hostChecks } from './preflight';
+import type { RepairStore } from './repair-store';
 
 export function repairPrompt(report: PreflightReport, workingDirectory: string): string {
   return [
@@ -24,48 +25,66 @@ export function createEnvironmentRepair(options: {
   host: Pick<HostClient, 'agent' | 'capabilities'>;
   report: (refresh?: boolean) => Promise<PreflightReport>;
   workingDirectory: string;
+  store: RepairStore;
   pollMs?: number;
 }) {
-  let state: RepairState = { status: 'idle' };
+  let state = options.store.load();
   let pending: Promise<RepairState> | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
+  function active(value: RepairState): boolean {
+    return ['starting', 'running', 'recovering', 'unknown'].includes(value.status);
+  }
+  function save(next: RepairState) {
+    if (disposed) return;
+    // If persistence fails, keep the in-memory guard and never submit again.
+    state = next;
+    options.store.save(next);
+  }
   function schedule() {
     if (disposed) return;
-    timer = setTimeout(() => { void poll(); }, options.pollMs ?? 2000);
+    clearTimeout(timer);
+    timer = setTimeout(() => { void reconcile(); }, options.pollMs ?? 2000);
     timer.unref();
   }
-  async function poll() {
-    if ((state.status !== 'running' && state.status !== 'starting') || !state.runId) return;
+  async function reconcile() {
+    if (disposed || state.status === 'idle' || !active(state)) return;
     const current = state;
     try {
-      const run = await options.host.agent.get({ runId: state.runId });
+      const run = current.runId
+        ? await options.host.agent.get({ runId: current.runId })
+        : await options.host.agent.findByIdempotencyKey({ idempotencyKey: current.idempotencyKey });
+      if (disposed) return;
+      if (!run) throw new Error('Host 暂未找到任务，不能据此确认提交未执行');
       if (run.status === 'running' || run.status === 'cancelling') {
-        state = { ...current, status: 'running', text: run.text || `Host 任务：${run.status}` };
+        save({ ...current, runId: run.runId, status: 'running', text: run.text || `已恢复 Host 任务：${run.status}` });
         schedule();
       } else {
         // A completed agent run is not a claim that the environment is healthy.
-        state = { ...current, status: run.status, text: `${run.text}\n${run.errorCode ?? ''}\n任务已结束，正在重新检测环境。` };
+        save({ ...current, runId: run.runId, status: 'recovering', text: `${run.text}\n${run.errorCode ?? ''}\n任务已结束，正在重新检测环境。` });
         try {
           await options.report(true);
-          state = { ...state, text: `${run.text}\n${run.errorCode ?? ''}\n已重新检测，请以下方预检结果为准。` };
+          save({ ...current, runId: run.runId, status: run.status, text: `${run.text}\n${run.errorCode ?? ''}\n已重新检测，请以下方预检结果为准。` });
         } catch (error) {
-          state = { ...state, text: `${state.text}\n重新检测失败：${String(error)}` };
+          save({ ...current, runId: run.runId, status: run.status, text: `${run.text}\n重新检测失败：${String(error)}` });
         }
       }
     } catch (error) {
-      state = { ...current, text: `无法读取 Host 进度，任务结果未知，将继续查询：${String(error)}` };
+      if (disposed) return;
+      state = { ...current, status: 'unknown', text: `提交结果未知，禁止重复提交。正在恢复任务 ${current.idempotencyKey}：${String(error)}` };
+      try { options.store.save(state); } catch { /* The prior durable intent still blocks after restart. */ }
       schedule();
     }
   }
   async function begin(): Promise<RepairState> {
-    if (state.status === 'running' || state.status === 'starting') return state;
+    if (active(state)) return state;
     const report = await options.report();
     const agent = (await hostChecks(options.host)).find((item) => item.id === 'host-agent');
     if (agent?.status !== 'ok') throw new Error(agent?.reason ?? 'agent 不可用');
     if (!report.items.some((item) => item.status === 'fail' && item.autoRepair)) throw new Error('没有可自动修复的失败项');
     const idempotencyKey = `openminutes-preflight-${randomUUID()}`;
-    state = { status: 'starting', idempotencyKey, runId: null, text: '正在请求 Floatboat 助手。' };
+    if (disposed) return state;
+    save({ status: 'starting', idempotencyKey, runId: null, text: '已保存提交意图，正在请求 Floatboat 助手。' });
     try {
       const { runId } = await options.host.agent.start({
         prompt: repairPrompt(report, options.workingDirectory),
@@ -73,25 +92,19 @@ export function createEnvironmentRepair(options: {
         idempotencyKey,
         timeoutMs: 600000,
       });
-      state = { status: 'running', idempotencyKey, runId, text: 'Floatboat 助手已接收任务，等待进度。' };
+      if (disposed) return state;
+      save({ status: 'running', idempotencyKey, runId, text: 'Floatboat 助手已接收任务，等待进度。' });
       schedule();
     } catch (error) {
-      // Recover ambiguous network failures with the same key; never submit a second task blindly.
-      try {
-        const run = await options.host.agent.findByIdempotencyKey({ idempotencyKey });
-        if (run) {
-          state = { status: 'running', idempotencyKey, runId: run.runId, text: '已找回 Host 任务，正在查询结果。' };
-          schedule();
-          return state;
-        }
-      } catch {
-        state = { status: 'starting', idempotencyKey, runId: null,
-          text: `提交结果未知，禁止重复提交。请在 Floatboat 按任务键 ${idempotencyKey} 核对：${String(error)}` };
-        return state;
-      }
-      state = { status: 'failed', idempotencyKey, runId: null, text: String(error) };
+      if (disposed) return state;
+      await reconcile();
     }
     return state;
+  }
+  if (state.status !== 'idle') {
+    // Even a persisted terminal snapshot may have crashed before reinspection.
+    save({ ...state, status: 'recovering', text: '正在恢复已保存的修复任务；确认 Host 状态前禁止重复提交。' });
+    schedule();
   }
   return {
     get: () => state,
