@@ -13,9 +13,9 @@ import { fileSize } from './media';
 import { nowIso, readSetting, row, run } from './sql';
 import { liveScriptSource } from './live-script';
 import { pumpFrames } from './live-asr';
+import { createPcmFramer, LIVE_DECODER_ARGS } from './live-audio';
 
 const PCM_BYTES_PER_SECOND = 32_000;
-const PCM_CHUNK_BYTES = 32_000; // 1s/帧：实测 0.2s 小帧会让识别侧长时间不返回，1s 稳定且延迟可接受
 
 interface Runtime {
   app: WorkbenchServer;
@@ -182,7 +182,7 @@ export async function startLive(app: WorkbenchServer): Promise<LiveState> {
     });
     const ffmpeg = spawn(
       ffmpegPath,
-      ['-v', 'error', '-f', 'mp3', '-i', 'pipe:0', '-f', 's16le', '-ac', '1', '-ar', '16000', 'pipe:1'],
+      LIVE_DECODER_ARGS,
       { windowsHide: true },
     );
     session.python = python;
@@ -203,13 +203,8 @@ export async function startLive(app: WorkbenchServer): Promise<LiveState> {
       for (const line of lines) handleStderrLine(session, line);
     });
 
-    let pcmPending: Buffer<ArrayBufferLike> = Buffer.alloc(0);
-    ffmpeg.stdout.on('data', (chunk: Buffer) => {
-      pcmPending = pcmPending.length === 0 ? chunk : Buffer.concat([pcmPending, chunk]);
-      while (pcmPending.length >= PCM_CHUNK_BYTES) {
-        session.queue.push(pcmPending.subarray(0, PCM_CHUNK_BYTES));
-        pcmPending = pcmPending.subarray(PCM_CHUNK_BYTES);
-      }
+    ffmpeg.stdout.pipe(createPcmFramer()).on('data', (chunk: Buffer) => {
+      session.queue.push(chunk);
       void pumpFrames(session);
     });
 
