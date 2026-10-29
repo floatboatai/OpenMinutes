@@ -1,30 +1,13 @@
 // ABOUTME: 录音笔 SDK 桥接：探测 Python/bleak/ffmpeg/SDK，并以固定参数调用 SDK 命令行。
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { BridgeRunResult, DeviceEnv, DeviceStatus, EnvProbe, ParsedDeviceFile } from '../contracts/app';
-import { pathCandidates, runCommand } from './media';
+import { runCommand, terminateChild } from './media';
+import { pythonCandidates, ffmpegCandidates, pythonRuntimeEnv as pythonEnvFor, uvPythonCandidates } from './tools';
+export { pythonCandidates, ffmpegCandidates, userSiteDir, pythonRuntimeEnv } from './tools';
 import { nowIso, readSetting } from './sql';
 import { SDK_ACTION_SCRIPT } from './sdk-script';
-
-/** Floatboat 自带工具与 node 位于同级 resources 目录，优先复用。 */
-function bundledTool(relative: string[]): string {
-  return path.resolve(path.dirname(process.execPath), '..', ...relative);
-}
-
-function dedupe(values: string[]): string[] {
-  return [...new Set(values.map((item) => item.trim()).filter(Boolean))];
-}
-
-export function pythonCandidates(configured: string): string[] {
-  return dedupe([configured, bundledTool(['python', 'python', 'python.exe']), ...pathCandidates('python'), 'python', 'python3']);
-}
-
-export function ffmpegCandidates(configured: string): string[] {
-  return dedupe([configured, bundledTool(['ffmpeg', 'bin', 'ffmpeg.exe']), ...pathCandidates('ffmpeg'), 'ffmpeg']);
-}
 
 export async function resolveFfmpeg(db: DatabaseSync): Promise<string | null> {
   for (const candidate of ffmpegCandidates(readSetting(db, 'ffmpeg_path'))) {
@@ -32,33 +15,6 @@ export async function resolveFfmpeg(db: DatabaseSync): Promise<string | null> {
     if (outcome.ok) return candidate;
   }
   return null;
-}
-
-/**
- * pip 在无写权限时会把包装进用户级 site-packages，而工作台的 python 进程
- * 默认不读用户目录。这里显式把用户 site 注入 PYTHONPATH，避免依赖进程环境。
- */
-export async function userSiteDir(pythonCommand: string | null): Promise<string | null> {
-  if (!pythonCommand) return null;
-  const outcome = await runCommand(pythonCommand, [
-    '-c',
-    'import site,sys;sys.stdout.write(site.getusersitepackages() if sys.prefix == sys.base_prefix else "")',
-  ], 12000);
-  const candidate = outcome.ok ? outcome.stdout.trim() : '';
-  return candidate && existsSync(candidate) ? candidate : null;
-}
-
-/** 供其它模块在 spawn Python 时复用同一套依赖注入。 */
-export async function pythonRuntimeEnv(pythonCommand: string | null): Promise<NodeJS.ProcessEnv | undefined> {
-  return pythonEnvFor(pythonCommand);
-}
-
-async function pythonEnvFor(pythonCommand: string | null): Promise<NodeJS.ProcessEnv | undefined> {
-  const discovered = await userSiteDir(pythonCommand);
-  if (!discovered) return undefined;
-  const existing = process.env.PYTHONPATH;
-  const parts = [discovered, ...(existing ? existing.split(path.delimiter) : [])].filter(Boolean);
-  return { ...process.env, PYTHONPATH: parts.join(path.delimiter) };
 }
 
 function textField(stdout: string, key: string): string | null {
@@ -99,11 +55,16 @@ export function parseStatus(stdout: string): DeviceStatus | null {
 }
 
 export async function probePython(configured: string): Promise<{ probe: EnvProbe; command: string | null }> {
-  for (const candidate of pythonCandidates(configured)) {
-    const outcome = await runCommand(candidate, ['--version'], 8000);
+  const managed = await uvPythonCandidates();
+  const candidates = [...new Set([configured, ...managed, ...pythonCandidates(configured)].filter(Boolean))];
+  for (const candidate of candidates) {
+    const outcome = await runCommand(candidate, ['-c',
+      'import sys;print(sys.executable);print("Python "+sys.version.split()[0]);sys.exit(0 if sys.version_info >= (3,10) else 1)',
+    ], 8000);
     if (outcome.ok) {
-      const version = `${outcome.stdout} ${outcome.stderr}`.trim().split('\n')[0] ?? candidate;
-      return { probe: { ok: true, detail: `${candidate} · ${version}`, resolvedPath: candidate }, command: candidate };
+      const [executable, version] = outcome.stdout.trim().split(/\r?\n/);
+      if (!executable) continue;
+      return { probe: { ok: true, detail: `${executable} · ${version}`, resolvedPath: executable }, command: executable };
     }
   }
   return { probe: { ok: false, detail: '未找到可用的 python 解释器', resolvedPath: null }, command: null };
@@ -119,6 +80,12 @@ export async function probeBleak(pythonCommand: string | null): Promise<EnvProbe
       'if sys.platform == "win32":',
       '    from bleak.backends.winrt.client import BleakClientWinRT',
       '    from bleak.backends.winrt.scanner import BleakScannerWinRT',
+      'elif sys.platform == "darwin":',
+      '    from bleak.backends.corebluetooth.client import BleakClientCoreBluetooth',
+      '    from bleak.backends.corebluetooth.scanner import BleakScannerCoreBluetooth',
+      'elif sys.platform.startswith("linux"):',
+      '    from bleak.backends.bluezdbus.client import BleakClientBlueZDBus',
+      '    from bleak.backends.bluezdbus.scanner import BleakScannerBlueZDBus',
       'print("bleak " + m.version("bleak"))',
     ].join('\n')],
     25000,
@@ -255,10 +222,11 @@ export async function runSdkAction(
       windowsHide: true,
       ...(pythonEnv ? { env: pythonEnv } : {}),
     });
+    child.stdin.end();
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill();
+      terminateChild(child);
       resolve({ code: null, stdout, stderr: `${stderr}\n[超时] SDK 调用超过 ${timeoutMs}ms` });
     }, timeoutMs);
     child.stdout?.on('data', (chunk: Buffer) => {

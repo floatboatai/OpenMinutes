@@ -6,16 +6,13 @@ import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { WorkbenchServer } from '../../sdk/runtime.mjs';
 import { readSetting } from './sql';
+import { containsPath, expandHomePath } from './paths';
 
 export const DEFAULT_LIBRARY_DIR = path.join(os.homedir(), 'memo', 'memotalk', 'raw');
 
 /** 允许用户在设置里写 `~/memo/...` 这样的家目录简写。 */
 export function expandHome(input: string): string {
-  const value = input.trim();
-  if (!value) return '';
-  if (value === '~') return os.homedir();
-  if (value.startsWith('~/') || value.startsWith('~\\')) return path.join(os.homedir(), value.slice(2));
-  return value;
+  return expandHomePath(input, os.homedir(), process.platform);
 }
 
 export function libraryRoot(db: DatabaseSync): string {
@@ -51,5 +48,5 @@ export async function resolveAudioFile(app: WorkbenchServer, storagePath: string
 
 export function displayPath(absolute: string): string {
   const home = os.homedir();
-  return absolute.startsWith(home) ? `~${absolute.slice(home.length).replace(/\\/g, '/')}` : absolute;
+  return containsPath(home, absolute, process.platform) ? `~${absolute.slice(home.length).replace(/\\/g, '/')}` : absolute;
 }

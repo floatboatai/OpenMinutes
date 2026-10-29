@@ -1,7 +1,6 @@
 // ABOUTME: ffmpeg 探测、时长解析与 16kHz 单声道 PCM16 解码，供转录流水线复用。
 
-import { spawn } from 'node:child_process';
-import path from 'node:path';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { stat } from 'node:fs/promises';
 
 export interface CommandOutcome {
@@ -9,6 +8,15 @@ export interface CommandOutcome {
   code: number | null;
   stdout: string;
   stderr: string;
+}
+
+export function terminateChild(child: ChildProcess): void {
+  child.kill();
+  const timer = setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  }, 1000);
+  timer.unref();
+  child.once('close', () => clearTimeout(timer));
 }
 
 /** 运行一个短命令并收集输出；超时后强制结束，绝不会无限等待。 */
@@ -25,6 +33,7 @@ export function runCommand(
     let child;
     try {
       child = spawn(command, args, { windowsHide: true, ...(env ? { env } : {}) });
+      child.stdin.end();
     } catch (error) {
       resolve({ ok: false, code: null, stdout: '', stderr: error instanceof Error ? error.message : '无法启动进程' });
       return;
@@ -32,7 +41,7 @@ export function runCommand(
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child?.kill();
+      if (child) terminateChild(child);
       resolve({ ok: false, code: null, stdout, stderr: `${stderr}\n[超时] 命令超过 ${timeoutMs}ms 未完成` });
     }, timeoutMs);
 
@@ -64,11 +73,7 @@ export interface ToolProbe {
 }
 
 /** 在 PATH 中展开可执行文件候选，兼容 Windows 扩展名。 */
-export function pathCandidates(name: string): string[] {
-  const extensions = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
-  const roots = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
-  return roots.flatMap((root) => extensions.map((extension) => path.join(root, `${name}${extension}`)));
-}
+export { pathCandidates } from './tools';
 
 const DURATION_PATTERN = /Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/;
 
@@ -114,6 +119,7 @@ export async function* decodePcmFrames(
     ['-v', 'error', '-i', filePath, '-vn', '-f', 's16le', '-acodec', 'pcm_s16le', '-ac', '1', '-ar', '16000', '-'],
     { windowsHide: true },
   );
+  child.stdin.end();
 
   let stderr = '';
   child.stderr?.on('data', (chunk: Buffer) => {
