@@ -1,0 +1,21 @@
+[
+  {"goto":"#/library"},
+  {"waitText":"录音库还是空的"},
+  {"screenshot":"01-empty.png"},
+  {"aria":"01-empty.aria.txt"},
+  {"click":"text=导入新录音"},
+  {"waitText":"1 个音频文件"},
+  {"click":"text=立即扫描"},
+  {"waitText":"导入 1 个文件，跳过 0 个，失败 0 个","timeout":20000},
+  {"screenshot":"02-imported.png"},
+  {"aria":"02-imported.aria.txt"},
+  {"goto":"#/library"},
+  {"waitText":"命中 1 条录音"},
+  {"click":"button.row__main"},
+  {"waitText":"返回录音库"},
+  {"expectText":"待转录"},
+  {"eval":"(async () => { const id = location.hash.split('/').pop(); const r = await fetch('/api/recordings/' + id); const body = await r.json(); const d = body.data; if (!r.ok || !body.ok || d.recording.status !== 'ready' || !d.recording.hasAudioFile || d.recording.transcriptChars !== 0 || d.jobs.length !== 0) throw Error('Unexpected imported recording: ' + JSON.stringify(body)); return body; })()"},
+  {"eval":"(async () => { const a = document.querySelector('audio'); if (!a) throw Error('Missing audio'); await a.play(); await new Promise((resolve, reject) => { const timeout = setTimeout(() => { a.removeEventListener('timeupdate', check); reject(Error('Playback did not advance')); }, 8000); function check() { if (a.currentTime > 0.25 && !a.paused && !a.error) { clearTimeout(timeout); a.removeEventListener('timeupdate', check); resolve(); } } a.addEventListener('timeupdate', check); check(); }); const result = { src: a.currentSrc, duration: a.duration, currentTime: a.currentTime, paused: a.paused, error: a.error }; if (!(a.duration >= 3 && a.duration <= 6)) throw Error('Unexpected duration'); a.pause(); return result; })()"},
+  {"screenshot":"03-playable.png"},
+  {"aria":"03-playable.aria.txt"}
+]
