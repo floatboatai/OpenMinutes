@@ -8,6 +8,16 @@ English | [简体中文](README.zh-CN.md)
 
 ---
 
+## Preview
+
+### MemoTalk S1
+
+![MemoTalk S1 recorder shown from multiple angles](docs/images/memotalk-s1.png)
+
+### OpenMinutes Workbench
+
+![OpenMinutes recording overview with device status, recording statistics, categories, and recent recordings](docs/images/openminutes-workbench.png)
+
 ## Why OpenMinutes?
 
 Recordings accumulate every day, but finding a particular conversation or listening back to everything becomes difficult.

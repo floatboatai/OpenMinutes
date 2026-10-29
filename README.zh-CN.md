@@ -8,6 +8,16 @@
 
 ---
 
+## 产品与工作台预览
+
+### MemoTalk S1 录音笔
+
+![MemoTalk S1 录音笔多角度展示](docs/images/memotalk-s1.png)
+
+### OpenMinutes 工作台
+
+![OpenMinutes 录音概览，展示设备状态、录音统计、分类分布和最近入库记录](docs/images/openminutes-workbench.png)
+
 ## 它解决什么问题
 
 录音笔的典型困境：素材每天在增长，但你听不回去、也找不回来。
