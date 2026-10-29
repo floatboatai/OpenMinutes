@@ -12,6 +12,9 @@
 
 ## Shell 避坑
 
+- 从 PowerShell 调用 `powershell.exe -Command` 时，外层双引号会先展开 `$变量`，反斜杠不能保护 `$`，会把 `$s.GetInstalledVoices()` 变成无效表达式。短命令用外层单引号；脚本用 UTF-16LE Base64 的 `-EncodedCommand`，文本/路径用环境变量传入，不拼进 PowerShell 源码。
+- PowerShell 中传给 `browse.mjs` 的 `@file` 参数必须加引号（例如 `'@.claude/skills/verify-openminutes/features/voice-import.steps.json'`），裸写 `@.claude/...` 会被当作 PowerShell 语法而报 `Unrecognized token`。
+
 - 需要生成含正则或反斜杠的 JS/脚本文件时，用 Write 工具写文件。不要用 heredoc 或 `sed -i` 生成：反斜杠会被吃掉（`\.`、`\[` 失效），正则会悄悄变成字符类而匹配失败。
 - `browse.mjs` 的步骤里，`eval` 的 JS 一旦含有引号，就先把步骤写进 JSON 文件，再用 `@file` 传入。在 shell 单引号里多层转义，会得到 `SyntaxError: Invalid or unexpected token`。
 - 排查残留进程时，不要按进程名或 `dist\server\index.mjs` 匹配：Floatboat 自己的工作台进程也匹配这个路径，用户的 Chrome 也在运行。要按 `run.json` 里的 pid，或者按 `*verify*browser-profile*` 匹配。另外，PowerShell 查询自身的命令行也会命中模式串，计数时要排除掉。
