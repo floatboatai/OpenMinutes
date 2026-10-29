@@ -11,9 +11,11 @@ import { registerMediaRoutes } from './routes/media';
 import { registerPipelineRoutes } from './routes/pipeline';
 import { registerRecordingRoutes } from './routes/recordings';
 import { registerSettingRoutes } from './routes/settings';
+import { recoverInterruptedTasks } from './sql';
 
 const app = await createWorkbenchServer(import.meta.url);
 
+recoverInterruptedTasks(app.database);
 registerAppRoute(app);
 registerRecordingRoutes(app);
 registerPipelineRoutes(app);
