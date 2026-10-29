@@ -6,6 +6,7 @@ import { api, errorText } from '../api';
 import { useAsyncData } from '../useApi';
 import { Button, Empty, ErrorState, Field, IconButton, Loading, Modal, useToast } from '../components/ui';
 import { formatDuration } from '../format';
+import { CalendarAssociation } from '../components/CalendarAssociation';
 
 export function localDay(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -222,6 +223,7 @@ export function CalendarPage() {
                 <small>{recording.calendarEventId ? '已关联事件' : '未关联事件'}</small></span>
             </button>
             <RecordingLinkSlot recording={recording} events={events.data ?? []} onChanged={refresh} />
+            {!recording.calendarEventId ? <CalendarAssociation id={recording.id} eventId={null} onChanged={refresh} /> : null}
           </div>)}
       </section>
       <aside className="calendar-results" aria-label="转录与纪要">
