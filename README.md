@@ -12,7 +12,7 @@ English | [简体中文](README.zh-CN.md)
 
 Recordings accumulate every day, but finding a particular conversation or listening back to everything becomes difficult.
 
-This workbench connects import, transcription, classification, and search in one workflow. Each recording has a clear stage label: awaiting download, awaiting transcription, transcribing, awaiting classification, classifying, archived, or failed. Batch operations use the current filters.
+This workbench connects import, transcription, classification, and search in one workflow. Each recording has a clear stage label: awaiting download, awaiting transcription, transcribing, awaiting classification, classifying, archived, or failed. Batch operations use the selected recordings.
 
 ## Features
 
@@ -23,8 +23,9 @@ This workbench connects import, transcription, classification, and search in one
 | AI classification | Use the Host LLM to generate structured titles, summaries, categories, tags, key points, action items, and importance levels, with manual editing |
 | Search and review | Search transcript text, titles, and summaries; filter by category, tag, or stage; sort by time; and process recordings in batches |
 | Recording details and playback | Play audio with HTTP Range support, seek to sentence timestamps, and review separate transcript, AI analysis, and execution-history sections |
-| Category management | Create, rename inline, recolor, and delete categories |
-| Device setup | Check the environment (Python, `bleak`, SDK, and `ffmpeg`), configure paths, browse the SDK command reference, and register recordings manually |
+| Category management | Create, rename inline, recolor, and delete custom categories; built-in categories cannot be deleted |
+| Device setup | Check the environment (Python, `bleak`, SDK, and `ffmpeg`), configure the import directory, browse the SDK command reference, and register recordings manually |
+| Live captions | Stream device audio through Host ASR, then save the recording and any transcript when stopped |
 
 ## Getting started
 
@@ -73,19 +74,33 @@ Without this variable, SDK integration tests are skipped; settings API and migra
 src/
   contracts/       Shared DTOs (app.ts) and untrusted-input validation (input.ts)
   server/          Node server: assembly, routing, and domain logic
+    index.ts       Server assembly and automatic-connection startup
     routes/        HTTP routes grouped by domain
+    app-route.ts   App metadata, overview, and tag-list routes
     http.ts        Shared { ok, data | error } envelope and error-code mapping
     sql.ts         Thin node:sqlite wrapper, settings, and job records
+    repo.ts        Recording, category, tag, and overview queries
+    library.ts     Library root, monthly folders, and legacy audio-path resolution
     ingest.ts      Directory scanning, manifest registration, deduplication, naming conflicts
+    pull.ts        BLE download staging, library attachment, and pending-file pulls
+    auto-connect.ts Background device checks and optional automatic pulls
     media.ts       ffmpeg probing, duration parsing, and PCM16 framing
     transcribe.ts  Host ASR sessions: parameter fallback, streaming, resumption, error classification
     organize.ts    Host LLM structured classification and text fallback
     pipeline.ts    Transcription/classification state machines and retries
+    jobs.ts        Task scheduling and automatic transcription after import/download
+    queue.ts       Serial background task queue
     bridge.ts      memotalk-sdk Python API bridge (fixed arguments, no concatenated commands)
+    sdk-script.ts  Python script for SDK status, listing, and download actions
+    live.ts        Live audio capture, file storage, and session persistence
+    live-asr.ts    On-demand live ASR sessions and frame streaming
+    live-script.ts Python script for SDK live audio streaming
   ui/              React UI: overview / library / details / device / categories / live / settings
 migrations/        Append-only SQLite migrations
-sdk/               @floatboat/workbench-sdk contracts and types (provided by the Host)
+sdk/               Host-provided Workbench runtime, clients, contracts, and types
 tests/             Server tests
+manifest.json      Host entry points, build profile, capabilities, and audio resource
+index.html         UI build entry point
 ```
 
 Related documentation (in Chinese): [requirements](REQUIREMENTS.md), [engineering conventions](ENGINEERING.md), and [design](DESIGN.md).
@@ -104,30 +119,55 @@ Related documentation (in Chinese): [requirements](REQUIREMENTS.md), [engineerin
 
 When resolving `import_dir`, an empty value falls back to the default; a path inside the system temporary directory is replaced with the default and written back to settings. An explicit `directory` in a scan request is used and saved directly, without that temporary-directory fallback.
 
+## Settings
+
+The settings page edits paths, automation, and recognition options. The device page edits only `import_dir`. `PATCH /api/settings` accepts `{ "values": { "key": "value" } }`; all values must be strings.
+
+| Keys | Behavior and defaults |
+| --- | --- |
+| `library_dir`, `import_dir` | Empty by default; resolved as described above; at most 500 characters each |
+| `python_path`, `ffmpeg_path` | Empty by default for automatic discovery; at most 500 characters each |
+| `auto_transcribe`, `auto_analyze` | Automatically transcribe after import/download and classify after transcription; both default to `"1"` |
+| `auto_connect`, `auto_pull` | Background device checks and pending-file downloads after a successful automatic connection; both default to `"1"` |
+| `auto_connect_minutes` | Integer string from `"1"` to `"120"`, default `"3"` |
+| `speaker_diarization` | File-transcription speaker separation, default `"1"` |
+| `asr_hotwords` | File-transcription hotwords, empty by default; at most 300 characters |
+| `asr_language` | At most 20 characters; the UI offers automatic (empty), `zh`, `en`, and `ja`. Currently saved as file-transcription metadata, but not passed to ASR |
+| `device_serial` | At most 64 characters; saved by device operations or via the API, not a field on the settings page |
+
+Flags accept only `"0"` or `"1"`. Background checks run while the workbench server is open; manual status checks do not trigger automatic pulls. Live ASR currently uses fixed PCM parameters rather than the file-transcription hotword, language, or speaker settings. `GET /api/settings` can also return runtime-written `last_auto_connect_at` and `last_auto_pull_at`; these are not writable through PATCH. The removed `sdk_dir` is hidden on reads and ignored on writes; other unknown keys are rejected.
+
 ## API overview
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/recordings` | List recordings with search, stage/category/tag filters, sorting, and pagination |
+| `GET` | `/api/app` | Application name and version |
+| `GET` | `/api/overview` | Recording statistics, device status, and overview data |
+| `GET` | `/api/tags` | Tag names for filtering |
+| `GET` | `/api/recordings` | List recordings with search, stage/category/tag/favorite/archive filters, sorting, and pagination |
 | `GET` | `/api/recordings/:id` | Details: metadata, transcript, AI analysis, and execution history |
-| `PATCH` | `/api/recordings/:id` | Edit title, category, tags, and importance |
+| `GET` | `/api/recordings/:id/tags` | Tag IDs and names for one recording |
+| `PATCH` | `/api/recordings/:id` | Edit title, summary, category, tags, importance, favorite, and archive flags |
 | `DELETE` | `/api/recordings/:id` | Delete a recording; attempt to move audio to `<library_dir>/_trash/<milliseconds>-<basename>` |
 | `GET` | `/api/recordings/:id/audio` | Audio stream with HTTP Range support (206 and `content-range`; 416 for out-of-range requests) |
 | `POST` | `/api/recordings/:id/export` | Copy audio to `import_dir` by default; optional body field `directory` overrides it |
 | `POST` | `/api/recordings/:id/transcribe` | Transcribe one recording |
 | `POST` | `/api/recordings/:id/organize` | AI classification for one recording |
-| `POST` | `/api/recordings/batch/transcribe`, `/api/recordings/batch/organize` | Batch transcription and classification |
+| `POST` | `/api/recordings/batch/transcribe`, `/api/recordings/batch/organize` | Queue transcription or classification for body field `ids`; skip ineligible recordings |
 | `GET` | `/api/ingest/directory` | Read import directory information |
 | `POST` | `/api/ingest/directory/ensure` | Create the import directory |
 | `POST` | `/api/ingest/scan` | Scan the import directory |
 | `POST` | `/api/ingest/manifest` | Register device manifest entries |
-| `GET` | `/api/device`, `/api/device/summary`, `/api/device/capabilities` | Device records, overview, and SDK command reference |
+| `GET` | `/api/device` | Environment checks, SDK command reference, Host capability summary, device records, and settings |
+| `GET` | `/api/device/summary` | Device/local recording counts and device/category counts |
+| `GET` | `/api/device/capabilities` | Host ASR/LLM operation availability, not BLE commands |
+| `DELETE` | `/api/device/:id` | Remove a local device record and clear its matching saved serial; does not delete recordings or device files |
 | `POST` | `/api/device/check`, `/api/device/list`, `/api/device/download`, `/api/device/status` | Environment check, file listing, BLE download, and status |
 | `GET` | `/api/live` | Live caption status |
 | `POST` | `/api/live/start`, `/api/live/stop` | Start or stop live captions |
 | `GET`, `POST` | `/api/categories` | List or create categories |
 | `PATCH`, `DELETE` | `/api/categories/:id` | Update or delete a category |
-| `GET`, `PATCH` | `/api/settings` | Paths, transcription/classification toggles, hotwords, and language |
+| `GET`, `PATCH` | `/api/settings` | Read settings or update the writable keys listed above |
 
 JSON responses use the `{ ok: true, data }` / `{ ok: false, error: { code, message } }` envelope. The audio endpoint returns an audio stream on success.
 

@@ -2,10 +2,10 @@
 
 ## 入口与装配
 
-- `src/server/index.ts`：只做装配，创建 `createWorkbenchServer` 并按领域注册路由。
-- `src/ui/main.tsx` 挂载页面；`src/ui/App.tsx` 负责侧边导航与哈希路由（`#/overview`、`#/library`、`#/rec/:id`、`#/device`、`#/categories`、`#/settings`）。
+- `src/server/index.ts`：创建 `createWorkbenchServer`、按领域注册路由并启动后台自动重连。
+- `src/ui/main.tsx` 挂载页面；`src/ui/App.tsx` 负责侧边导航与哈希路由（`#/overview`、`#/library`、`#/rec/:id`、`#/device`、`#/categories`、`#/live`、`#/settings`）。
 - `src/contracts/` 保存跨端 DTO（`app.ts`）与不可信输入校验（`input.ts`）；浏览器端不得导入服务端模块。
-- `migrations/` 只追加。`0001_initial.sql` 已包含全部业务表与分类、SDK 指令、设置种子。
+- `migrations/` 只追加。`0001_initial.sql` 包含业务表与初始种子；`0002_auto_runtime_settings.sql` 增加录音库、自动转录与重连设置，`0003_auto_pull.sql` 增加自动拉取设置，`0004_remove_sdk_dir.sql` 删除旧 SDK 目录设置。
 - 源码是编辑入口，`dist/` 由 Host 生成；类型与构建通过 `check_workbench_project`，`workbench_runtime open` 应用更新。
 
 ## 模块职责
@@ -15,14 +15,30 @@
 | `server/http.ts` | 统一 `{ ok, data \| error }` 信封与错误码映射 |
 | `server/sql.ts` | node:sqlite 薄封装、设置读写、任务记录、标签同步 |
 | `server/repo.ts` | 录音列表/详情/分类/总览的读取查询 |
+| `server/app-route.ts` | `/api/app`、`/api/overview`、`/api/tags` |
+| `server/library.ts` | 录音库根目录、分月归档与历史路径兼容 |
 | `server/ingest.ts` | 目录扫描导入、设备清单登记、下载文件挂接、去重与命名冲突处理 |
+| `server/pull.ts` | BLE 下载暂存、挂接入库与按预算拉取待下载文件 |
+| `server/auto-connect.ts` | 后台定时探测设备，自动连接成功后按开关触发拉取 |
 | `server/media.ts` | ffmpeg 探测、时长解析、16kHz 单声道 PCM16 分帧解码 |
 | `server/transcribe.ts` | Host ASR 会话：参数降级启动、推流、事件收集、收尾与错误归类 |
 | `server/organize.ts` | Host LLM 结构化归类：提示词、JSON Schema、文本回退与结论落库 |
 | `server/pipeline.ts` | 转录/归类状态机：`job_runs` 记录、失败可重试、自动归类开关 |
 | `server/queue.ts` | 串行队列，避免同时占满 Host ASR 在途上限 |
-| `server/bridge.ts` | SDK 桥接：探测 Python/bleak/SDK/ffmpeg，以固定参数调用 SDK 命令行 |
+| `server/jobs.ts` | `trackTask` 与队列装配、导入/拉取后自动转录 |
+| `server/bridge.ts`、`server/sdk-script.ts` | 探测 Python/bleak/SDK/ffmpeg，以固定 Python 脚本调用 SDK API |
+| `server/live.ts`、`server/live-script.ts` | 实时采集、音频落盘与停止后的录音/文本保存 |
+| `server/live-asr.ts` | 按需开启实时识别会话、推流与会话重建 |
 | `server/routes/*` | 按领域拆分的 HTTP 路由 |
+
+## 设置与 API
+
+- 完整 API 列表见中英文 README；`/api/device` 含 SDK 指令参考库，`/api/device/capabilities` 返回的是 Host ASR/LLM 能力，不是 BLE 指令。
+- `PATCH /api/settings` 使用 `{ values: { key: string } }`，先校验所有键再写入。路径键为 `import_dir`、`library_dir`、`python_path`、`ffmpeg_path`；开关键为 `auto_transcribe`、`auto_analyze`、`auto_connect`、`auto_pull`、`speaker_diarization`，值只接受 `"0"` / `"1"`。
+- `auto_connect_minutes` 接受 1~120 的整数字符串，默认 3；文本键为 `asr_hotwords`、`asr_language`、`device_serial`。路径、热词、语言、序列号的长度上限分别为 500、300、20、64 字符。`sdk_dir` 读取隐藏、提交忽略；其他未知键拒绝。运行时的 `last_auto_connect_at` / `last_auto_pull_at` 可以读取，不能由该接口修改。
+- 设置页编辑上述路径、开关、间隔、热词与语言，设备页仅编辑导入目录；序列号由设备操作或 API 保存。五个开关的迁移默认值均为 `"1"`。
+- `asr_language` 当前只写入文件转录结果元数据，未从流水线传给 ASR；实时识别仅传固定 PCM 参数，不读取热词、语言或说话人分离设置。
+- 自动重连由服务端每 30 秒检查是否到期，受间隔、新鲜设备状态和 SDK 忙碌状态限制；成功后按 `auto_pull` 拉取。手动 `/api/device/status` 不触发自动拉取。
 
 ## 持久化对象
 
@@ -39,7 +55,7 @@
 - **Host ASR**：把本机音频解码后流式送出，只保存文本与分段，不上传音频原件。
 - **Host LLM**：只发送转写文本与分类说明，返回结构化 JSON Schema 校验后的对象。
 - **本机进程**：`ffmpeg` 用于解码/探测；`python` 以固定脚本和参数调用 PyPI `memotalk-sdk` 的 `MemoTalkClient`（状态、清单、下载及实时流），不接受用户拼接的任意命令，也不加载 SDK 源码目录。
-- 所有外部写操作先落状态再执行，失败保留 `last_error` 与 `job_runs` 记录。
+- 文件转录与归类流水线维护录音状态和 `job_runs`，失败保存 `last_error`；这不是所有外部操作的统一保证。例如导入按文件返回结果，设备操作返回 SDK 结果，自动重连异常静默处理。
 
 ## 可执行验证
 
