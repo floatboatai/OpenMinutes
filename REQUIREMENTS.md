@@ -13,6 +13,11 @@ MemoTalk S1 录音笔的录音资产管理中枢。把录音笔采集的 MP3 录
 
 持久化对象：devices、recordings、transcripts、analyses、categories、tags、recording_tags、job_runs、sdk_commands、settings。全部使用正式 SQLite 迁移建表，分类与 SDK 指令做种子数据。
 
+任务反馈以当前实现为准：
+- 服务端将内存队列临时投影为 `queued_transcribe`（转录已排队）/ `queued_organize`（归类已排队），不落库；执行中的数据库状态优先。代码依据：`src/server/queue.ts:25`、`src/server/repo.ts:59`。
+- 单条任务在前置校验通过后，对已排队/执行中录音返回 `BUSY`；批量任务跳过这些录音。代码依据：`src/server/routes/pipeline.ts:25`、`src/server/routes/pipeline.ts:46`、`src/server/routes/pipeline.ts:66`、`src/server/routes/pipeline.ts:84`。
+- 列表接口返回全库任务信号 `hasActiveTasks`，录音库据此轮询；详情页依据当前录音的排队/执行中状态轮询。间隔均为 2600ms，详情退出忙碌状态、录音库全库任务结束后分别停止。代码依据：`src/server/repo.ts:150`、`src/ui/pages/Library.tsx:54`、`src/ui/pages/Detail.tsx:51`、`src/contracts/recording-status.ts:1`。
+
 存储行为以当前实现为准：
 - `import_dir` 默认 `~/memo/memotalk/inbox`，`library_dir` 默认 `~/memo/memotalk/raw`。目录使用绝对路径或 `~/...`。修改录音库设置不会移动已有文件；新版 `storage_path` 保存完整目标路径（默认或绝对路径配置下为绝对路径），历史相对文件名仍从 Host 的 `audio` 资源读取。
 - 导出只复制音频，默认写入 `import_dir`；API 请求体可用 `directory` 指定其他目录，详情页不指定。目标目录缺失时创建，同名文件可能被覆盖。

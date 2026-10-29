@@ -4,7 +4,7 @@
 
 - `src/server/index.ts`：创建 `createWorkbenchServer`、按领域注册路由并启动后台自动重连。
 - `src/ui/main.tsx` 挂载页面；`src/ui/App.tsx` 负责侧边导航与哈希路由（`#/overview`、`#/library`、`#/rec/:id`、`#/device`、`#/categories`、`#/live`、`#/settings`）。
-- `src/contracts/` 保存跨端 DTO（`app.ts`）与不可信输入校验（`input.ts`）；浏览器端不得导入服务端模块。
+- `src/contracts/` 保存跨端 DTO（`app.ts`）、不可信输入校验（`input.ts`）及排队/执行中状态判定（`recording-status.ts`）；浏览器端不得导入服务端模块。
 - `migrations/` 只追加。`0001_initial.sql` 包含业务表与初始种子；`0002_auto_runtime_settings.sql` 增加录音库、自动转录与重连设置，`0003_auto_pull.sql` 增加自动拉取设置，`0004_remove_sdk_dir.sql` 删除旧 SDK 目录设置。
 - 源码是编辑入口，`dist/` 由 Host 生成；类型与构建通过 `check_workbench_project`，`workbench_runtime open` 应用更新。
 
@@ -14,7 +14,7 @@
 | --- | --- |
 | `server/http.ts` | 统一 `{ ok: true, data }` / `{ ok: false, error: string, code: string }` 信封与错误码映射 |
 | `server/sql.ts` | node:sqlite 薄封装、设置读写、任务记录、标签同步 |
-| `server/repo.ts` | 录音列表/详情/分类/总览的读取查询 |
+| `server/repo.ts` | 录音列表/详情/分类/总览查询；组合内存队列与数据库状态，投影排队状态并计算全库 `hasActiveTasks` |
 | `server/app-route.ts` | `/api/app`、`/api/overview`、`/api/tags` |
 | `server/library.ts` | 录音库根目录、分月归档与历史路径兼容 |
 | `server/ingest.ts` | 目录扫描导入、设备清单登记、下载文件挂接、去重与命名冲突处理 |
@@ -24,7 +24,7 @@
 | `server/transcribe.ts` | Host ASR 会话：参数降级启动、推流、事件收集、收尾与错误归类 |
 | `server/organize.ts` | Host LLM 结构化归类：提示词、JSON Schema、文本回退与结论落库 |
 | `server/pipeline.ts` | 转录/归类状态机：`job_runs` 记录、失败可重试、自动归类开关 |
-| `server/queue.ts` | 串行队列，避免同时占满 Host ASR 在途上限 |
+| `server/queue.ts` | 串行执行任务；保留等待/运行中标签至任务结束，提供快照、单条排队状态与全库录音任务查询 |
 | `server/jobs.ts` | `trackTask` 与队列装配、导入/拉取后自动转录 |
 | `server/bridge.ts`、`server/sdk-script.ts` | 探测 Python/bleak/SDK/ffmpeg，以固定 Python 脚本调用 SDK API |
 | `server/live.ts`、`server/live-script.ts` | 实时采集、音频落盘与停止后的录音/文本保存 |
@@ -40,6 +40,14 @@
 - 设置页编辑上述路径、开关、间隔、热词与语言，设备页仅编辑导入目录；序列号由设备操作或 API 保存。五个开关的迁移默认值均为 `"1"`。
 - `asr_language` 当前只写入文件转录结果元数据，未从流水线传给 ASR；实时识别仅传固定 PCM 参数，不读取热词、语言或说话人分离设置。
 - 自动重连由服务端每 30 秒检查是否到期，受间隔、新鲜设备状态和 SDK 忙碌状态限制；成功后按 `auto_pull` 拉取。手动 `/api/device/status` 不触发自动拉取。
+
+## 排队状态与轮询
+
+- `queue.ts` 的内存标签覆盖等待及运行中的任务，任务完成或失败后由 `finally` 清理；`queuedRecordingStatus` 查询单条录音，`hasRecordingTasks` 查询全库转录/归类任务。代码依据：`src/server/queue.ts:8`、`src/server/queue.ts:25`、`src/server/queue.ts:31`。
+- `repo.ts` 在摘要与详情响应中临时投影 `queued_transcribe` / `queued_organize`，对应「转录已排队 / 归类已排队」，不写入数据库。数据库中的 `transcribing` / `analyzing` 优先于队列投影；阶段筛选仍使用数据库状态。代码依据：`src/server/repo.ts:30`、`src/server/repo.ts:59`、`src/server/repo.ts:202`；标签见 `src/ui/components/ui.tsx:125`。
+- 列表结果为 `{ items, total, hasActiveTasks }`。`hasActiveTasks` 同时检查内存录音任务与数据库中的执行中状态，是全库信号，不受当前搜索、筛选、分页影响。代码依据：`src/contracts/app.ts:115`、`src/server/repo.ts:150`。
+- 单条转录/归类在音频/文本前置校验通过后，对排队或执行中的录音返回 `BUSY`；批量接口跳过这些录音并计入 `skipped`。批量路由先于 `:id` 注册，避免 `batch` 被识别成录音 ID。代码依据：`src/server/routes/pipeline.ts:13`、`src/server/routes/pipeline.ts:25`、`src/server/routes/pipeline.ts:46`、`src/server/routes/pipeline.ts:66`、`src/server/routes/pipeline.ts:84`。
+- 共享 `isBusyStatus` 包含两种排队状态及 `transcribing` / `analyzing`。详情页据当前录音状态每 2600ms 轮询，退出这些状态后停止；录音库根据 `hasActiveTasks` 以相同间隔轮询，全库均无排队/执行中任务后停止，不能只判断当前列表行。代码依据：`src/contracts/recording-status.ts:1`、`src/ui/pages/Detail.tsx:51`、`src/ui/pages/Library.tsx:54`、`src/ui/useApi.ts:48`。
 
 ## 持久化对象
 

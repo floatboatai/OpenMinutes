@@ -16,7 +16,11 @@
 ## 数据密度与主流程
 
 列表优先：一条录音一行，含标题、时间、字数、分类、标签、时长、状态。
-主流程为 `导入 → 转录 → 归类 → 检索`，每个阶段在列表上都有明确状态标签（待拉取 / 待转录 / 转录中 / 待归类 / 归类中 / 已归档 / 失败），批量操作按当前选择执行。
+主流程为 `导入 → 转录 → 归类 → 检索`，每个阶段在列表上都有明确状态标签（待拉取 / 待转录 / 转录已排队 / 转录中 / 待归类 / 归类已排队 / 归类中 / 已归档 / 失败），批量操作按当前选择执行。
+
+- 「转录已排队 / 归类已排队」对应 `queued_transcribe` / `queued_organize`，由服务端从内存队列临时投影，不落库；执行中的数据库状态优先。代码依据：`src/server/repo.ts:59`、`src/ui/components/ui.tsx:125`。
+- 详情页在当前录音排队或执行中时每 2600ms 轮询，进入非忙碌状态后停止。录音库根据列表响应的全库 `hasActiveTasks` 轮询，不因当前筛选结果中没有活跃录音而停止；全库任务结束后停止。代码依据：`src/ui/pages/Detail.tsx:51`、`src/contracts/recording-status.ts:1`、`src/ui/pages/Library.tsx:54`、`src/server/repo.ts:150`。
+- 单条转录/归类在前置条件通过后拒绝重复排队并返回 `BUSY`，批量操作跳过已排队/执行中录音并反馈接受/跳过数量。代码依据：`src/server/routes/pipeline.ts:25`、`src/server/routes/pipeline.ts:46`、`src/server/routes/pipeline.ts:66`、`src/server/routes/pipeline.ts:84`。
 
 ## 页面与适用状态
 
