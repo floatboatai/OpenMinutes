@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Archive, ArrowLeft, Check, Download, FileAudio, HardDriveDownload, Pencil, Sparkles, Star, Trash2, Waves } from 'lucide-react';
 import type { Category, RecordingDetail } from '../../contracts/app';
+import { isBusyStatus } from '../../contracts/recording-status';
 import { api, errorText } from '../api';
 import { formatBytes, formatDateTime, formatDuration } from '../format';
 import { useAsyncData, usePolling } from '../useApi';
@@ -16,6 +17,7 @@ import {
   Loading,
   Segmented,
   StatusChip,
+  statusLabel,
   Tag,
   useToast,
 } from '../components/ui';
@@ -46,7 +48,7 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
   const detail = useAsyncData<RecordingDetail>(() => api.get<RecordingDetail>(`/api/recordings/${id}`), `detail:${id}`);
   const categories = useAsyncData<Category[]>(() => api.get<Category[]>('/api/categories'), 'categories');
   const data = detail.data;
-  const busy = data ? data.recording.status === 'transcribing' || data.recording.status === 'analyzing' : false;
+  const busy = data ? isBusyStatus(data.recording.status) : false;
   usePolling(detail.reload, 2600, busy);
 
   useEffect(() => {
@@ -245,8 +247,11 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
 
       {busy ? (
         <p className="notice" role="status">
-          {recording.status === 'transcribing' ? '正在转录' : '正在归类'}
+          {statusLabel(recording.status)}
           {(() => {
+            if (recording.status === 'queued_transcribe' || recording.status === 'queued_organize') {
+              return '，等待前面的任务完成。';
+            }
             const runningJob = data.jobs.find((job) => job.status === 'running');
             return runningJob?.message ? `：${runningJob.message}` : '，长录音需要几分钟，可以离开此页。';
           })()}

@@ -6,6 +6,9 @@ import { finishJob, num, nowIso, pruneTags, readSetting, row, run, startJob, str
 import { transcribeAudioFile } from './transcribe';
 import { organizeRecording } from './organize';
 import { resolveFfmpeg } from './bridge';
+import { isBusyStatus } from '../contracts/recording-status';
+
+export { isBusyStatus } from '../contracts/recording-status';
 
 export interface PipelineDeps {
   db: DatabaseSync;
@@ -38,10 +41,6 @@ function hotwords(db: DatabaseSync): string[] {
     .map((item) => item.trim())
     .filter((item) => item.length > 0 && item.length <= 20)
     .slice(0, 50);
-}
-
-export function isBusyStatus(status: string): boolean {
-  return status === 'transcribing' || status === 'analyzing';
 }
 
 /** 转录一条录音；失败时保留可重试状态与原因，不吞掉错误。 */

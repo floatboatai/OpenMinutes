@@ -122,6 +122,8 @@ export function IconButton({ label, onClick, active, disabled, children }: IconB
 const STATUS_META: Record<RecordingStatus, { label: string; tone: string }> = {
   pending: { label: '待拉取', tone: 'neutral' },
   ready: { label: '待转录', tone: 'info' },
+  queued_transcribe: { label: '转录已排队', tone: 'busy' },
+  queued_organize: { label: '归类已排队', tone: 'busy' },
   transcribing: { label: '转录中', tone: 'busy' },
   transcribed: { label: '待归类', tone: 'info' },
   analyzing: { label: '归类中', tone: 'busy' },

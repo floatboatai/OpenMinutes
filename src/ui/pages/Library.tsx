@@ -5,7 +5,7 @@ import { Mic, Search, Sparkles, Star, Waves } from 'lucide-react';
 import type { Category, RecordingListResult, RecordingSummary } from '../../contracts/app';
 import { api, errorText } from '../api';
 import { formatDateTime, formatDuration } from '../format';
-import { useAsyncData, useDebounced } from '../useApi';
+import { useAsyncData, useDebounced, usePolling } from '../useApi';
 import { Button, Empty, ErrorState, Loading, Segmented, StatusChip, Tag, useToast } from '../components/ui';
 
 const STAGES = [
@@ -51,6 +51,7 @@ export function LibraryPage({ onOpen, onNavigate }: Props) {
   const queryKey = search.toString();
 
   const list = useAsyncData<RecordingListResult>(() => api.get<RecordingListResult>(`/api/recordings?${queryKey}`), queryKey);
+  usePolling(list.reload, 2600, list.data?.hasActiveTasks ?? false);
   const categories = useAsyncData<Category[]>(() => api.get<Category[]>('/api/categories'), 'categories');
   const tags = useAsyncData<Array<{ name: string; count: number }>>(() => api.get('/api/tags'), 'tags');
 

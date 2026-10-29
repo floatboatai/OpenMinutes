@@ -3,6 +3,8 @@
 export type RecordingStatus =
   | 'pending'
   | 'ready'
+  | 'queued_transcribe'
+  | 'queued_organize'
   | 'transcribing'
   | 'transcribed'
   | 'analyzing'
@@ -109,6 +111,8 @@ export interface RecordingDetail {
 export interface RecordingListResult {
   items: RecordingSummary[];
   total: number;
+  /** 全库任务状态，不受当前筛选和分页影响。 */
+  hasActiveTasks: boolean;
 }
 
 export interface LiveState {

@@ -20,3 +20,14 @@ export function enqueue(label: string, task: Task): void {
 export function queueSnapshot(): string[] {
   return [...pending];
 }
+
+/** 队列包含等待和正在执行的任务，直到 finally 清理才算结束。 */
+export function queuedRecordingStatus(recordingId: number): 'queued_transcribe' | 'queued_organize' | null {
+  if (pending.includes(`transcribe:${recordingId}`)) return 'queued_transcribe';
+  if (pending.includes(`organize:${recordingId}`)) return 'queued_organize';
+  return null;
+}
+
+export function hasRecordingTasks(): boolean {
+  return pending.some((label) => /^(transcribe|organize):\d+$/.test(label));
+}
