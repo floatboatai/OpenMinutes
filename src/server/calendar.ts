@@ -65,6 +65,7 @@ export function saveCalendarEvent(db: DatabaseSync, input: CalendarEventInput, u
     digest=CASE WHEN calendar_events.summary IS excluded.summary AND calendar_events.description IS excluded.description
       AND calendar_events.location IS excluded.location AND calendar_events.start_time IS excluded.start_time
       AND calendar_events.end_time IS excluded.end_time AND calendar_events.attendees IS excluded.attendees
+      AND calendar_events.all_day IS excluded.all_day
       THEN calendar_events.digest ELSE NULL END,
     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') RETURNING id`)
     .get(uid, input.summary, input.description, input.location, input.startTime, input.endTime,

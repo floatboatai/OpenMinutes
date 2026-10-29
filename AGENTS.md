@@ -23,3 +23,6 @@
   `rg -g '*.mjs' pattern sdk` instead of passing a wildcard path.
 - The pinned verification skill's `text=` selector does not match `strong`.
   Use a specific button CSS selector when its label is rendered in `strong`.
+- For verification readbacks separated by long browser sessions, request
+  `Connection: close`; a stale Node fetch keep-alive socket produced ECONNRESET
+  even though the isolated server's doctor and logs remained healthy.

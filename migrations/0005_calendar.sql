@@ -24,8 +24,8 @@ WHEN OLD.calendar_event_id IS NOT NEW.calendar_event_id
 BEGIN
   UPDATE calendar_events SET digest = NULL WHERE id IN (OLD.calendar_event_id, NEW.calendar_event_id);
 END;
-CREATE TRIGGER calendar_content_changed AFTER UPDATE OF transcript_text, summary ON recordings
-WHEN OLD.transcript_text IS NOT NEW.transcript_text OR OLD.summary IS NOT NEW.summary
+CREATE TRIGGER calendar_content_changed AFTER UPDATE OF transcript_text, summary, title ON recordings
+WHEN OLD.transcript_text IS NOT NEW.transcript_text OR OLD.summary IS NOT NEW.summary OR OLD.title IS NOT NEW.title
 BEGIN
   UPDATE calendar_events SET digest = NULL WHERE id = NEW.calendar_event_id;
 END;

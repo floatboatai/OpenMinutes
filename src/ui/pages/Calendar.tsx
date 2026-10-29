@@ -167,7 +167,13 @@ export function CalendarPage() {
           if (!file) return;
           if (file.size > 2 * 1024 * 1024) { toast.push('日历文件不能超过 2 MB', 'error'); return; }
           setBusy(true);
-          void file.text().then((content) => api.post<{ imported: number; events: CalendarEvent[] }>('/api/calendar/import', { filename: file.name, content }))
+          void file.text().then((content) => {
+            const body = { filename: file.name, content };
+            if (new TextEncoder().encode(JSON.stringify(body)).length > 2000000) {
+              throw new Error('日历内容超出上传限制，请拆分后导入');
+            }
+            return api.post<{ imported: number; events: CalendarEvent[] }>('/api/calendar/import', body);
+          })
             .then((result) => {
               toast.push(`已导入 ${result.imported} 个日历事件`, 'success');
               const first = result.events[0];
