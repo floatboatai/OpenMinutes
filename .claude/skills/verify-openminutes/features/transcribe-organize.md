@@ -1,13 +1,13 @@
 # 转录与归类（Host 边界）
 
-转录用 ffmpeg 把 MP3 解码成 16 kHz PCM，再通过 Floatboat Host 的 ASR 流式识别；AI 归类调用 Host 的 LLM 输出结构化结论。这两项能力都依赖 Host 连接。本 skill 独立启动的实例没有 Host 连接，所以**这里只能验证失败是否如实呈现、是否可以重试**，成功路径需要在 Floatboat 里验证。
+转录用 ffmpeg 把 MP3 解码成 16 kHz PCM，再通过 Floatboat Host 的 ASR 流式识别；AI 归类调用 Host 的 LLM 输出结构化结论。这两项能力都依赖 Host 连接。本 skill 独立启动的实例没有 Host 连接，所以**本文件只验证失败是否如实呈现、是否可以重试**。成功路径见 [transcribe-success.md](./transcribe-success.md)，需要 Host 模式。
 
 ## Sub-features
 
 - `asr-unavailable`：「开始转录」→ 状态变为「失败」，详情页出现「上次处理未成功：语音识别无法启动。…HOST_NOT_CONNECTED…」，「执行记录」里多一条 failure。
 - `llm-unavailable`：没有转录文本时「AI 归类」按钮被禁用；即使通过接口强行触发，也只会失败，不会写入伪造的结论。
 - `env-report`：设备接入页「本机环境」的「语音识别」「文本模型」两行显示 `HOST_NOT_CONNECTED` 和「未就绪」。
-- `asr-success`（**本 skill 不覆盖**）：需要在 Floatboat 中执行 `workbench_runtime open`，按 ENGINEERING.md「可执行验证」第 2、3 步进行。
+- `asr-success` / `llm-success`：转到 [成功路径配方](./transcribe-success.md)，先确认隔离 Host 模式及额度前提；独立模式只执行其中的 TTS 导入/播放。
 
 ## How to get to it (user POV)
 

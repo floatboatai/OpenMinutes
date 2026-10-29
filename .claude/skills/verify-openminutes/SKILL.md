@@ -1,6 +1,6 @@
 ---
 name: verify-openminutes
-description: 在本机真实拉起 OpenMinutes（录音笔工作台）的服务端 + Web UI，用无头 Chrome/Edge 按用户路径操作并留存截图、ARIA 树、接口响应和日志作为证据。改动了 src/ui、src/server 或迁移后、需要证明「导入/录音库/详情播放/分类/设置」等行为真的可用时使用；不适用于 Host ASR/LLM（转录、AI 归类）的成功路径。
+description: 在本机真实拉起 OpenMinutes（录音笔工作台）的服务端 + Web UI，用无头 Chrome/Edge 按用户路径操作并留存截图、ARIA 树、接口响应和日志作为证据。需要证明导入、录音库、详情播放、分类、设置或转录/AI 归类行为时使用；ASR/LLM 成功配方需要额外的隔离 Host 模式，独立模式只验证音频准备与失败路径。
 ---
 
 # verify-openminutes
@@ -11,7 +11,7 @@ description: 在本机真实拉起 OpenMinutes（录音笔工作台）的服务�
 
 ## 边界（先读）
 
-- **转录 / AI 归类 / 实时字幕的成功路径无法在这里验证。** 独立运行时没有 Host 连接，ASR 与 LLM 一律返回 `HOST_NOT_CONNECTED`。这里只能证明失败被如实呈现（状态「失败」+ 详情页红色错误条 + `job_runs` 记录）。成功路径必须在 Floatboat 里 `workbench_runtime open` 后验证，并在报告里写明「未在本 skill 覆盖」。
+- **独立模式不能验证转录 / AI 归类 / 实时字幕成功。** 无 Host 连接时 ASR 与 LLM 返回 `HOST_NOT_CONNECTED`，只能证明失败如实呈现。转录与 AI 归类的成功配方见 [features/transcribe-success.md](features/transcribe-success.md)，先满足其中的隔离 Host 模式与额度前提；本分支的 launch 尚不提供 Host 模式。实时字幕成功仍不在覆盖范围内。
 - **BLE 设备不要碰。** 设备页的「连接并检测」「读取清单」「下载」会通过本机 Python + bleak 真正连无线电。launch 已关闭 `auto_connect` / `auto_pull`，驱动时也不要点这几个按钮。
 - **不要驱动不是本次 run 启动的实例。** 用户的 Floatboat 里可能开着同一个应用（数据在 `%APPDATA%\floatboat\workbench\data\workbench.3bb3830b-…`），那是真实数据，绝不读写、绝不 kill。
 - 多个 run 可以并行：端口随机、数据目录 / 收件目录 / 归档目录 / 浏览器 profile 都按 runId 隔离。
@@ -81,7 +81,7 @@ ffmpeg -hide_banner -loglevel error -f lavfi -i "sine=frequency=440:duration=6" 
 - 既要留下动作前后的状态，也要留下最终画面：至少一张操作前、一张操作后的截图或 ARIA。
 - 副作用要单独核对：导入后 `library/<yyyy-MM>/` 下真的出现了文件；删除后文件被移进 `library/_trash/`；修改后再 `GET` 一次读回存储的值。
 - 报告时写清楚用的是哪个功能、哪个入口。功能文件里列出的其它入口如果没跑，要明确写「未验证」，不能拿别的路径代替。
-- 遇到 Host 能力（ASR/LLM）时，只能证明「失败如实呈现」，不能宣称成功。
+- 独立模式遇到 Host 能力（ASR/LLM）时，只能证明「失败如实呈现」。Host 成功配方的未执行项必须明确标为未验证。
 
 ## Cleanup
 
@@ -104,5 +104,6 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='ch
 | `scripts/doctor.mjs <runId>` | 只读体检，exit 0 才可以继续驱动 |
 | `scripts/browse.mjs <runId> <label> <steps>` | 无头浏览器驱动页面，并留存证据 |
 | `scripts/cleanup.mjs <runId>` | 停掉本 run 的进程并删除 scratch，保留证据 |
+| `scripts/make-voice.mjs --output <RECyyyyMMdd_HHmmss.mp3> [--language zh-CN\|en-US] [--text <短句>]` | 离线 TTS → 16 kHz 单声道 MP3，详见成功路径配方 |
 
 维护功能清单：应用变化后用 `/pstack:maintain-verification-skill` 更新 `features/`。
