@@ -1,7 +1,7 @@
 [
   {"goto":"#/rec/1"},
   {"waitText":"返回录音库"},
-  {"eval":"(async () => { const env = await fetch('/api/device').then(r => r.json()); if (!env.ok || !['语音识别', '文本模型'].every(domain => env.data.capabilities.some(c => c.domain === domain && c.ok))) throw Error('Host ASR/LLM not ready; no paid task submitted'); const b = await fetch('/api/recordings/1').then(r => r.json()); if (!b.ok || b.data.recording.status !== 'ready' || b.data.jobs.length) throw Error('Requires fresh recording 1; do not rerun paid calls'); window.__route = location.hash; return b; })()"},
+  {"eval":"(async () => { const required = { asr: ['start', 'sendFrame', 'events', 'stop'], llm: ['generateObject', 'generateText'] }; const response = await fetch('/api/device/capabilities'); const body = await response.json(); const capabilities = body.data; const ready = (domain, operations) => operations.every(operation => capabilities?.[domain]?.some(item => item.operation === operation && item.declared === true && item.status === 'available')); if (!response.ok || !body.ok || !ready('asr', required.asr) || !ready('llm', required.llm)) throw Error('Host ASR/LLM capabilities incomplete; no paid task submitted'); const b = await fetch('/api/recordings/1').then(r => r.json()); if (!b.ok || b.data.recording.status !== 'ready' || b.data.jobs.length) throw Error('Requires fresh recording 1; do not rerun paid calls'); window.__route = location.hash; return b; })()"},
   {"screenshot":"01-before.png"},
   {"aria":"01-before.aria.txt"},
   {"click":"text=开始转录"},

@@ -1,6 +1,6 @@
 [
   {"goto":"#/device"},
-  {"eval":"(async () => { const b = await fetch('/api/device').then(r => r.json()); if (!b.ok || !['语音识别', '文本模型'].every(domain => b.data.capabilities.some(c => c.domain === domain && c.ok))) throw Error('Host ASR/LLM not ready; no paid task submitted'); return b.data.capabilities; })()"},
+  {"eval":"(async () => { const required = { asr: ['start', 'sendFrame', 'events', 'stop'], llm: ['generateObject', 'generateText'] }; const response = await fetch('/api/device/capabilities'); const body = await response.json(); const capabilities = body.data; const ready = (domain, operations) => operations.every(operation => capabilities?.[domain]?.some(item => item.operation === operation && item.declared === true && item.status === 'available')); if (!response.ok || !body.ok || !ready('asr', required.asr) || !ready('llm', required.llm)) throw Error('Host ASR/LLM capabilities incomplete; no paid task submitted'); return capabilities; })()"},
   {"waitText":"3 个音频文件"},
   {"click":"text=立即扫描"},
   {"waitText":"导入 2 个文件，跳过 1 个，失败 0 个","timeout":20000},

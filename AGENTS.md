@@ -14,6 +14,7 @@
 
 - 从 PowerShell 调用 `powershell.exe -Command` 时，外层双引号会先展开 `$变量`，反斜杠不能保护 `$`，会把 `$s.GetInstalledVoices()` 变成无效表达式。短命令用外层单引号；脚本用 UTF-16LE Base64 的 `-EncodedCommand`，文本/路径用环境变量传入，不拼进 PowerShell 源码。
 - PowerShell 中传给 `browse.mjs` 的 `@file` 参数必须加引号（例如 `'@.claude/skills/verify-openminutes/features/voice-import.steps.json'`），裸写 `@.claude/...` 会被当作 PowerShell 语法而报 `Unrecognized token`。
+- 当前 Windows PowerShell 不支持 `&&`，会在执行前报 `The token '&&' is not a valid statement separator`。需要串联不可逆操作时，先单独运行并检查前置命令，再运行下一条；不要把检查和推送写进同一条换行命令。
 
 - 需要生成含正则或反斜杠的 JS/脚本文件时，用 Write 工具写文件。不要用 heredoc 或 `sed -i` 生成：反斜杠会被吃掉（`\.`、`\[` 失效），正则会悄悄变成字符类而匹配失败。
 - `browse.mjs` 的步骤里，`eval` 的 JS 一旦含有引号，就先把步骤写进 JSON 文件，再用 `@file` 传入。在 shell 单引号里多层转义，会得到 `SyntaxError: Invalid or unexpected token`。
