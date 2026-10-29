@@ -22,14 +22,14 @@
 Preconditions:
 
 - 满足基线条件。按 [目录导入](./directory-import.md) 导入两个文件：`REC20261029_101500.mp3`（6 秒）和 `REC20261029_113000.mp3`（4 秒）。
-- 搜索只会命中已经有标题、摘要或转录的字段。独立运行时没有转录文本，所以先在详情页把第一条录音的标题改成「产品评审」（见 [录音详情](./recording-detail.md)）。
+- 以下基础配方先把第一条录音标题改成「产品评审」（见 [录音详情](./recording-detail.md)）。要证明全文检索，使用 [Host 单条配方](./transcribe-organize.md)：在归类前搜索 TTS 的「蓝色铅笔」，接口确认标题/摘要为空且只命中已转录录音，避免把标题匹配误当全文匹配。
 
 - **空库。** 在导入任何文件之前运行 `browse.mjs <runId> lib-empty '[{"goto":"#/library"},{"waitText":"录音库还是空的"},{"screenshot":"empty.png"}]'`。
 - **列表。** 运行 `browse.mjs <runId> lib '[{"goto":"#/library"},{"waitText":"命中 2 条录音"},{"screenshot":"01-list.png"},{"aria":"01-list.aria.txt"}]'`。
 - **搜索命中。** 在同一次调用里追加 `{"fill":"aria=搜索录音","value":"产品评审"},{"waitText":"命中 1 条录音"},{"expectNoText":"REC20261029_113000.mp3"},{"screenshot":"02-hit.png"}`。
 - **搜索无结果。** 追加 `{"fill":"aria=搜索录音","value":"zzz-no-match"},{"waitText":"没有符合条件的录音"},{"screenshot":"03-miss.png"}`。
 - **清空搜索。** 追加 `{"fill":"aria=搜索录音","value":""},{"waitText":"命中 2 条录音"}`。
-- **阶段筛选。** 先在第一条录音的详情页点一次「开始转录」，让它因为 `HOST_NOT_CONNECTED` 进入失败状态（见 [转录与归类](./transcribe-organize.md)）。然后追加 `{"click":"text=失败"},{"waitText":"命中 1 条录音"},{"screenshot":"04-failed.png"}`，再用 `curl -s "$URL/api/recordings?stage=failed"` 核对，`total` 应为 1。
+- **阶段筛选。** 此失败配方须使用 `--no-host` 启动。先在第一条详情页点「开始转录」，让它因为 `HOST_NOT_CONNECTED` 进入失败状态（见 [转录与归类](./transcribe-organize.md)）。然后追加 `{"click":"text=失败"},{"waitText":"命中 1 条录音"},{"screenshot":"04-failed.png"}`，再用 `curl -s "$URL/api/recordings?stage=failed"` 核对，`total` 应为 1。
 - **排序。** 追加 `{"click":"text=全部"},{"waitText":"命中 2 条录音"},{"select":"aria=排序方式","value":"duration"},{"sleep":300},{"eval":"[...document.querySelectorAll('.row__title')].map(e => e.innerText)"}`。预期 6 秒的那条排在前面。
 
 ## Gotchas

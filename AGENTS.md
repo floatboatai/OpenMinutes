@@ -22,3 +22,5 @@
 - 在 Windows 上 kill 服务进程后立刻打开它的 `data.sqlite` 写入，可能报 `disk I/O error`（文件句柄还没释放）。直接改库来模拟崩溃时，写库要带重试（例如每 500ms 一次、最多 20 次）。
 - GitHub 网络偶尔出现 EOF 或 TLS 握手超时。`gh pr create` 失败后，先用 `gh pr list --head <branch> --state all` 确认 PR 没有建成再重试，避免重复开 PR。
 - 独立启动的服务不能把导入目录放在系统临时目录（`%TEMP%`），否则应用会把它改回真实的 `~/memo/memotalk/inbox`。scratch 数据放在 `.workbench/` 下（已被 gitignore）。
+- PowerShell 调用 `browse.mjs` 时，`@file` 参数必须整体加引号，例如 `'@.claude/skills/verify-openminutes/recipes/host-single.json'`；裸写 `@.claude/...` 会被 PowerShell 解析成语法而报错。
+- Windows 下 `rg` 的目录参数不要写 `sdk/*`，使用 `rg <pattern> sdk` 或 `rg --files sdk -g '<glob>'`。先用 `rg --files` 定位再读文件；Floatboat 的 SDK 位于 `resources/workbench-sdk/`，不在 `workbench-toolchain/sdk/`。
