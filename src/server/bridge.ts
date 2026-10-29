@@ -2,7 +2,6 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { BridgeRunResult, DeviceEnv, DeviceStatus, EnvProbe, ParsedDeviceFile } from '../contracts/app';
@@ -39,35 +38,14 @@ export async function resolveFfmpeg(db: DatabaseSync): Promise<string | null> {
  * pip 在无写权限时会把包装进用户级 site-packages，而工作台的 python 进程
  * 默认不读用户目录。这里显式把用户 site 注入 PYTHONPATH，避免依赖进程环境。
  */
-let cachedUserSite: string | null | undefined;
-
 export async function userSiteDir(pythonCommand: string | null): Promise<string | null> {
-  if (cachedUserSite !== undefined) return cachedUserSite;
-  if (!pythonCommand) {
-    cachedUserSite = null;
-    return null;
-  }
-  const outcome = await runCommand(pythonCommand, ['-c', 'import site,sys;sys.stdout.write(site.getusersitepackages())'], 12000);
+  if (!pythonCommand) return null;
+  const outcome = await runCommand(pythonCommand, [
+    '-c',
+    'import site,sys;sys.stdout.write(site.getusersitepackages() if sys.prefix == sys.base_prefix else "")',
+  ], 12000);
   const candidate = outcome.ok ? outcome.stdout.trim() : '';
-  cachedUserSite = candidate && existsSync(candidate) ? candidate : null;
-  return cachedUserSite;
-}
-
-let pythonLibDir: string | null = null;
-let lastPythonPath = '';
-
-/** 由服务端在装配时注入工作台自带的 Python 依赖目录。 */
-export function setPythonLibDir(directory: string): void {
-  pythonLibDir = directory;
-}
-
-function pythonSiteCandidates(): string[] {
-  const list: string[] = [];
-  if (pythonLibDir) list.push(pythonLibDir);
-  const appData = process.env.APPDATA;
-  if (appData) list.push(path.join(appData, 'Python', 'Python312', 'site-packages'));
-  list.push(path.join(os.homedir(), 'AppData', 'Roaming', 'Python', 'Python312', 'site-packages'));
-  return list;
+  return candidate && existsSync(candidate) ? candidate : null;
 }
 
 /** 供其它模块在 spawn Python 时复用同一套依赖注入。 */
@@ -76,15 +54,10 @@ export async function pythonRuntimeEnv(pythonCommand: string | null): Promise<No
 }
 
 async function pythonEnvFor(pythonCommand: string | null): Promise<NodeJS.ProcessEnv | undefined> {
-  const dirs = pythonSiteCandidates().filter((directory) => existsSync(directory));
-  if (dirs.length === 0) {
-    const discovered = await userSiteDir(pythonCommand);
-    if (discovered) dirs.push(discovered);
-  }
-  lastPythonPath = dirs.join(path.delimiter);
-  if (dirs.length === 0) return undefined;
+  const discovered = await userSiteDir(pythonCommand);
+  if (!discovered) return undefined;
   const existing = process.env.PYTHONPATH;
-  const parts = [...dirs, ...(existing ? existing.split(path.delimiter) : [])].filter(Boolean);
+  const parts = [discovered, ...(existing ? existing.split(path.delimiter) : [])].filter(Boolean);
   return { ...process.env, PYTHONPATH: parts.join(path.delimiter) };
 }
 
@@ -141,7 +114,13 @@ export async function probeBleak(pythonCommand: string | null): Promise<EnvProbe
   const env = await pythonEnvFor(pythonCommand);
   const outcome = await runCommand(
     pythonCommand,
-    ['-c', 'import bleak, importlib.metadata as m; print("bleak " + m.version("bleak"))'],
+    ['-c', [
+      'import bleak, importlib.metadata as m, sys',
+      'if sys.platform == "win32":',
+      '    from bleak.backends.winrt.client import BleakClientWinRT',
+      '    from bleak.backends.winrt.scanner import BleakScannerWinRT',
+      'print("bleak " + m.version("bleak"))',
+    ].join('\n')],
     25000,
     env,
   );
