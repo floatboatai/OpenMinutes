@@ -1,11 +1,26 @@
 import type { WorkbenchServer } from '../../../sdk/runtime.mjs';
 import { asObject, BadInput, pathParam, reqString } from '../../contracts/input';
 import { importCalendarFile } from '../calendar-import';
+import { generateDayDigest, generateEventDigest } from '../calendar-digest';
 import { calendarRange, calendarRecordings, getCalendarEvent, linkCalendarRecording, listCalendarEvents, parseCalendarInput, recordingSuggestions, saveCalendarEvent } from '../calendar';
 import { api } from '../http';
 import { readRecordingDetail } from '../repo';
 
 export function registerCalendarRoutes(app: WorkbenchServer): void {
+  app.route('GET', '/api/calendar/events/:id/digest', api((context) => ({
+    digest: getCalendarEvent(context.database, pathParam(context.params, 'id')).digest,
+  })));
+  app.route('POST', '/api/calendar/events/:id/digest', api((context) =>
+    generateEventDigest(context.database, context.host, pathParam(context.params, 'id'))));
+  app.route('POST', '/api/calendar/digest', api((context) => {
+    const body = asObject(context.body);
+    const [start, end] = calendarRange(reqString(body, 'start'), reqString(body, 'end'));
+    const day = reqString(body, 'day', 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Date.parse(end) - Date.parse(start) > 25 * 3600000) {
+      throw new BadInput('日报必须选择一个日期');
+    }
+    return generateDayDigest(context.database, context.host, start, end, day);
+  }));
   app.route('POST', '/api/calendar/import', api((context) => {
     const body = asObject(context.body);
     const filename = reqString(body, 'filename', 255);
