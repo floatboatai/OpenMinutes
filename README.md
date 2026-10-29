@@ -12,7 +12,7 @@ English | [简体中文](README.zh-CN.md)
 
 Recordings accumulate every day, but finding a particular conversation or listening back to everything becomes difficult.
 
-This workbench connects import, transcription, classification, and search in one workflow. Each recording has a clear stage label: awaiting download, awaiting transcription, transcribing, awaiting classification, classifying, archived, or failed. Batch operations use the selected recordings.
+This workbench connects import, transcription, classification, and search in one workflow. Each recording has a clear stage label: awaiting download, awaiting transcription, transcription queued, transcribing, awaiting classification, classification queued, classifying, archived, or failed. Batch operations use the selected recordings.
 
 ## Features
 
@@ -72,14 +72,14 @@ Without this variable, SDK integration tests are skipped; settings API and migra
 
 ```text
 src/
-  contracts/       Shared DTOs (app.ts) and untrusted-input validation (input.ts)
+  contracts/       Shared DTOs (app.ts), input validation (input.ts), busy states (recording-status.ts)
   server/          Node server: assembly, routing, and domain logic
     index.ts       Server assembly and automatic-connection startup
     routes/        HTTP routes grouped by domain
     app-route.ts   App metadata, overview, and tag-list routes
     http.ts        Shared API envelope and top-level error/code mapping
     sql.ts         Thin node:sqlite wrapper, settings, and job records
-    repo.ts        Recording, category, tag, and overview queries
+    repo.ts        Queries, transient queued-status projection, and library-wide hasActiveTasks
     library.ts     Library root, monthly folders, and legacy audio-path resolution
     ingest.ts      Directory scanning, manifest registration, deduplication, naming conflicts
     pull.ts        BLE download staging, library attachment, and pending-file pulls
@@ -89,7 +89,7 @@ src/
     organize.ts    Host LLM structured classification and text fallback
     pipeline.ts    Transcription/classification state machines and retries
     jobs.ts        Task scheduling and automatic transcription after import/download
-    queue.ts       Serial background task queue
+    queue.ts       Serial task execution, pending/running labels, and task-state queries
     bridge.ts      memotalk-sdk Python API bridge (fixed arguments, no concatenated commands)
     sdk-script.ts  Python script for SDK status, listing, and download actions
     live.ts        Live audio capture, file storage, and session persistence
@@ -145,16 +145,16 @@ Flags accept only `"0"` or `"1"`. Background checks run while the workbench serv
 | `GET` | `/api/app` | Application name and version |
 | `GET` | `/api/overview` | Recording statistics, device status, and overview data |
 | `GET` | `/api/tags` | Tag names for filtering |
-| `GET` | `/api/recordings` | List recordings with search, stage/category/tag/favorite/archive filters, sorting, and pagination |
+| `GET` | `/api/recordings` | List recordings with search, stage/category/tag/favorite/archive filters, sorting, and pagination; data contains `items`, `total`, and library-wide `hasActiveTasks` |
 | `GET` | `/api/recordings/:id` | Details: metadata, transcript, AI analysis, and execution history |
 | `GET` | `/api/recordings/:id/tags` | Tag IDs and names for one recording |
 | `PATCH` | `/api/recordings/:id` | Edit title, summary, category, tags, importance, favorite, and archive flags |
 | `DELETE` | `/api/recordings/:id` | Delete a recording; attempt to move audio to `<library_dir>/_trash/<milliseconds>-<basename>` |
 | `GET` | `/api/recordings/:id/audio` | Audio stream with HTTP Range support (206 and `content-range`; 416 for out-of-range requests) |
 | `POST` | `/api/recordings/:id/export` | Copy audio to `import_dir` by default; optional body field `directory` overrides it |
-| `POST` | `/api/recordings/:id/transcribe` | Transcribe one recording |
-| `POST` | `/api/recordings/:id/organize` | AI classification for one recording |
-| `POST` | `/api/recordings/batch/transcribe`, `/api/recordings/batch/organize` | Queue transcription or classification for body field `ids`; skip ineligible recordings |
+| `POST` | `/api/recordings/:id/transcribe` | Queue transcription; after prerequisite checks, reject already queued/running recordings with `BUSY` |
+| `POST` | `/api/recordings/:id/organize` | Queue AI classification; after prerequisite checks, reject already queued/running recordings with `BUSY` |
+| `POST` | `/api/recordings/batch/transcribe`, `/api/recordings/batch/organize` | Queue transcription or classification for body field `ids`; skip already queued/running or otherwise ineligible recordings |
 | `GET` | `/api/ingest/directory` | Read import directory information |
 | `POST` | `/api/ingest/directory/ensure` | Create the import directory |
 | `POST` | `/api/ingest/scan` | Scan the import directory |
@@ -171,6 +171,14 @@ Flags accept only `"0"` or `"1"`. Background checks run while the workbench serv
 | `GET`, `PATCH` | `/api/settings` | Read settings or update the writable keys listed above |
 
 JSON responses use the `{ ok: true, data }` / `{ ok: false, error: string, code: string }` envelope. The audio endpoint returns an audio stream on success.
+
+### Queued tasks and polling
+
+- `queued_transcribe` ("transcription queued") and `queued_organize` ("classification queued") are temporary statuses projected by the server from its in-memory queue into recording summaries and details, not stored in SQLite. Stored `transcribing` / `analyzing` statuses take precedence. Stage filters still use stored statuses. Code: `src/server/queue.ts:25`, `src/server/repo.ts:30`, `src/server/repo.ts:59`, `src/server/repo.ts:202`.
+- `GET /api/recordings` returns `data.hasActiveTasks`: whether any transcription/classification task is queued or running across the library. It checks queue labels and stored running statuses, independently of search, filters, and pagination. Code: `src/server/repo.ts:150`, `src/contracts/app.ts:115`.
+- Single-recording transcription/classification checks audio/text prerequisites first, then returns `BUSY` for an already queued or running recording. Batch operations skip such recordings and report `accepted`, `skipped`, and accepted `ids`. Code: `src/server/routes/pipeline.ts:25`, `src/server/routes/pipeline.ts:46`, `src/server/routes/pipeline.ts:66`, `src/server/routes/pipeline.ts:84`.
+- The detail page polls every 2.6 seconds while its recording is queued or running and stops when that recording leaves those states. The library polls at the same interval while `hasActiveTasks` is true, even if active recordings are outside the current results; it stops when no queued or running tasks remain across the library. Code: `src/contracts/recording-status.ts:1`, `src/ui/pages/Detail.tsx:51`, `src/ui/pages/Library.tsx:54`, `src/ui/useApi.ts:48`.
+- `queue.ts` retains waiting and running task labels until `finally` removes them, including after failure, and exposes task-state queries. `repo.ts` combines these queries with stored statuses to build response statuses and `hasActiveTasks`. Code: `src/server/queue.ts:8`, `src/server/queue.ts:25`, `src/server/queue.ts:31`, `src/server/repo.ts:59`, `src/server/repo.ts:150`.
 
 ## Design principles
 

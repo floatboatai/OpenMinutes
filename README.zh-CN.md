@@ -12,7 +12,7 @@
 
 录音笔的典型困境：素材每天在增长，但你听不回去、也找不回来。
 
-这个工作台把「导入 → 转录 → 归类 → 检索」做成一条闭环流水线，每条录音在列表上都有明确阶段标签（待拉取 / 待转录 / 转录中 / 待归类 / 归类中 / 已归档 / 失败），批量操作按勾选的录音执行。
+这个工作台把「导入 → 转录 → 归类 → 检索」做成一条闭环流水线，每条录音在列表上都有明确阶段标签（待拉取 / 待转录 / 转录已排队 / 转录中 / 待归类 / 归类已排队 / 归类中 / 已归档 / 失败），批量操作按勾选的录音执行。
 
 ## 功能
 
@@ -72,14 +72,14 @@ SDK 会自动安装 `bleak`；无需克隆 SDK 源码或配置 SDK 目录。
 
 ```text
 src/
-  contracts/       跨端 DTO（app.ts）与不可信输入校验（input.ts）
+  contracts/       跨端 DTO（app.ts）、输入校验（input.ts）、忙碌状态（recording-status.ts）
   server/          Node 服务端：装配、路由、领域逻辑
     index.ts       服务装配与自动重连启动
     routes/        按领域拆分的 HTTP 路由
     app-route.ts   应用信息、概览与标签列表路由
     http.ts        统一 API 信封与顶层 error/code 映射
     sql.ts         node:sqlite 薄封装、设置读写、任务记录
-    repo.ts        录音、分类、标签与概览查询
+    repo.ts        读取查询、临时排队状态投影与全库 hasActiveTasks
     library.ts     录音库根目录、月目录与历史音频路径解析
     ingest.ts      目录扫描、清单登记、去重与命名冲突处理
     pull.ts        BLE 下载暂存、挂接入库与待拉取文件处理
@@ -89,7 +89,7 @@ src/
     organize.ts    Host LLM 结构化归类与文本回退
     pipeline.ts    转录/归类状态机与重试
     jobs.ts        任务调度与导入/拉取后的自动转录
-    queue.ts       串行后台任务队列
+    queue.ts       串行执行、等待/运行中任务标签与任务状态查询
     bridge.ts      memotalk-sdk Python API 桥接（固定参数，不接受拼接命令）
     sdk-script.ts  SDK 状态、清单、下载操作的 Python 脚本
     live.ts        实时音频采集、文件落盘与会话保存
@@ -145,16 +145,16 @@ index.html         UI 构建入口
 | `GET` | `/api/app` | 应用名称与版本 |
 | `GET` | `/api/overview` | 录音统计、设备状态与概览数据 |
 | `GET` | `/api/tags` | 用于筛选的标签名称列表 |
-| `GET` | `/api/recordings` | 列表：搜索 / 阶段 / 分类 / 标签 / 收藏 / 归档筛选 / 排序 / 分页 |
+| `GET` | `/api/recordings` | 列表：搜索 / 阶段 / 分类 / 标签 / 收藏 / 归档筛选 / 排序 / 分页；data 含 `items`、`total` 和全库 `hasActiveTasks` |
 | `GET` | `/api/recordings/:id` | 详情（元数据 + 转录 + AI 结论 + 执行记录） |
 | `GET` | `/api/recordings/:id/tags` | 单条录音的标签 ID 与名称 |
 | `PATCH` | `/api/recordings/:id` | 人工修正标题、摘要、分类、标签、重要度、收藏与归档标记 |
 | `DELETE` | `/api/recordings/:id` | 删除录音，尝试将音频移入 `<library_dir>/_trash/<毫秒时间戳>-<原存储文件名>` |
 | `GET` | `/api/recordings/:id/audio` | 音频流，HTTP Range（206 + `content-range`，越界 416） |
 | `POST` | `/api/recordings/:id/export` | 默认复制音频到 `import_dir`，可用请求体字段 `directory` 覆盖目标目录 |
-| `POST` | `/api/recordings/:id/transcribe` | 单条转录 |
-| `POST` | `/api/recordings/:id/organize` | 单条 AI 归类 |
-| `POST` | `/api/recordings/batch/transcribe`, `/api/recordings/batch/organize` | 按请求体 `ids` 排队转录或归类，跳过不符合条件的录音 |
+| `POST` | `/api/recordings/:id/transcribe` | 排队转录；前置条件校验后，已排队/执行中的录音返回 `BUSY` |
+| `POST` | `/api/recordings/:id/organize` | 排队 AI 归类；前置条件校验后，已排队/执行中的录音返回 `BUSY` |
+| `POST` | `/api/recordings/batch/transcribe`, `/api/recordings/batch/organize` | 按请求体 `ids` 排队转录或归类，跳过已排队/执行中及其他不符合条件的录音 |
 | `GET` | `/api/ingest/directory` | 读取导入目录信息 |
 | `POST` | `/api/ingest/directory/ensure` | 创建导入目录 |
 | `POST` | `/api/ingest/scan` | 扫描导入目录 |
@@ -171,6 +171,14 @@ index.html         UI 构建入口
 | `GET`, `PATCH` | `/api/settings` | 读取设置，或修改上文列出的可写设置键 |
 
 JSON 响应统一为 `{ ok: true, data }` / `{ ok: false, error: string, code: string }` 信封。音频接口成功时返回音频流。
+
+### 排队任务与轮询
+
+- `queued_transcribe`（转录已排队）和 `queued_organize`（归类已排队）是服务端根据内存队列临时投影到录音摘要及详情中的状态，不写入 SQLite。数据库中的 `transcribing` / `analyzing` 优先展示；阶段筛选仍按数据库状态执行。代码依据：`src/server/queue.ts:25`、`src/server/repo.ts:30`、`src/server/repo.ts:59`、`src/server/repo.ts:202`。
+- `GET /api/recordings` 返回 `data.hasActiveTasks`，表示全库是否有排队或进行中的转录/归类任务。它同时检查队列标签和数据库中的执行中状态，不受搜索、筛选或分页影响。代码依据：`src/server/repo.ts:150`、`src/contracts/app.ts:115`。
+- 单条转录/归类先校验音频或文本前置条件，再对已排队或执行中的录音返回 `BUSY`。批量操作跳过这些录音，并返回 `accepted`、`skipped` 及接受的 `ids`。代码依据：`src/server/routes/pipeline.ts:25`、`src/server/routes/pipeline.ts:46`、`src/server/routes/pipeline.ts:66`、`src/server/routes/pipeline.ts:84`。
+- 详情页在当前录音排队或执行中时每 2.6 秒轮询，离开这些状态后停止。录音库在 `hasActiveTasks` 为 true 时以相同间隔轮询，即使活跃录音不在当前结果中；全库没有排队或执行中任务后才停止。代码依据：`src/contracts/recording-status.ts:1`、`src/ui/pages/Detail.tsx:51`、`src/ui/pages/Library.tsx:54`、`src/ui/useApi.ts:48`。
+- `queue.ts` 保留等待和运行中的任务标签，直到 `finally` 清理（包括失败），并提供任务状态查询；`repo.ts` 将查询结果与数据库状态组合，生成响应状态及 `hasActiveTasks`。代码依据：`src/server/queue.ts:8`、`src/server/queue.ts:25`、`src/server/queue.ts:31`、`src/server/repo.ts:59`、`src/server/repo.ts:150`。
 
 ## 设计原则（节选）
 
