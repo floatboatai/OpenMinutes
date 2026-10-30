@@ -2,9 +2,10 @@
 // Read-only: is this run's instance alive, ours, current, and still fenced off from real data?
 // Usage: node .claude/skills/verify-openminutes/scripts/doctor.mjs <runId>
 // Exit 0 = safe to drive; exit 1 = do not drive (reasons printed).
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { readRun, runPaths } from './run-safety.mjs';
+import { assertHostListener, probeHost } from './host.mjs';
 
 const root = resolve(process.env.OPENMINUTES_ROOT ?? resolve(import.meta.dirname, '../../../..'));
 const runId = process.argv[2];
@@ -20,6 +21,23 @@ if (!existsSync(runPath)) {
 const run = readRun(root, runId);
 const problems = [];
 const report = { runId, url: run.url, pid: run.pid };
+report.host = { mode: run.hostMode ?? 'none', available: false };
+try {
+  const config = JSON.parse(readFileSync(join(run.runDir, 'workbench-config.json'), 'utf8'));
+  if (config.dataDirectory !== run.dirs.data || config.sourceDirectory !== root
+    || config.generation !== runId || config.nonce !== run.nonce) {
+    problems.push('run configuration isolation/identity mismatch');
+  }
+  if (report.host.mode === 'floatboat') {
+    assertHostListener(config.hostConnection);
+    Object.assign(report.host, await probeHost(config.hostConnection));
+  } else if (config.hostConnection) {
+    problems.push('HOST_MODE_CONFIG_MISMATCH');
+  }
+} catch (error) {
+  problems.push(error.message.startsWith('HOST_') || error.message.startsWith('FLOATBOAT_')
+    ? error.message : 'HOST_CONFIG_CHECK_FAILED');
+}
 
 try {
   const health = await fetch(`${run.url}/__workbench/health`, { headers: { authorization: `Bearer ${run.nonce}` } });

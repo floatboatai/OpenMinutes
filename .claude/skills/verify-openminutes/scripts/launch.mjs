@@ -7,8 +7,10 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { assertIdentity, localOrigin, runPaths, waitStopped } from './run-safety.mjs';
+import { discoverHost, probeHost } from './host.mjs';
 
-export async function launch(root, runId, { readyTimeout = 30000 } = {}) {
+export async function launch(root, runId, { readyTimeout = 30000, hostMode = 'none' } = {}) {
+  if (!['none', 'floatboat'].includes(hostMode)) throw new Error('Invalid Host mode');
   const paths = runPaths(root, runId);
   root = paths.root;
   const { runDir, evidenceDir } = paths;
@@ -16,6 +18,8 @@ export async function launch(root, runId, { readyTimeout = 30000 } = {}) {
   const entry = join(root, 'dist', 'server', 'index.mjs');
   if (!existsSync(entry)) throw new Error('dist/ missing; run scripts/build.mjs first');
   const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
+  const hostConnection = hostMode === 'floatboat' ? discoverHost(manifest.appId) : undefined;
+  if (hostConnection) await probeHost(hostConnection);
   mkdirSync(join(root, '.workbench', 'verify'), { recursive: true });
   mkdirSync(join(root, '.workbench', 'verify-evidence'), { recursive: true });
   // Non-recursive mkdir reserves the ID against simultaneous launches.
@@ -46,6 +50,7 @@ export async function launch(root, runId, { readyTimeout = 30000 } = {}) {
   writeFileSync(configPath, JSON.stringify({
     appId: manifest.appId, generation: runId, nonce, sourceDirectory: root,
     dataDirectory: dirs.data, development: true,
+    ...(hostConnection ? { hostConnection } : {}),
   }), { flag: 'wx' });
   const logPath = join(evidenceDir, 'server.log');
   let child;
@@ -74,7 +79,7 @@ export async function launch(root, runId, { readyTimeout = 30000 } = {}) {
       await new Promise((done) => setTimeout(done, 100));
     }
     if (!url) throw new Error(`Server not ready; see ${logPath}`);
-    const run = { runId, url, pid: child.pid, nonce, root, runDir, evidenceDir, dirs, startedAt: new Date().toISOString() };
+    const run = { runId, url, pid: child.pid, nonce, root, runDir, evidenceDir, dirs, hostMode, startedAt: new Date().toISOString() };
     await assertIdentity(run);
     const response = await fetch(`${url}/api/settings`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
@@ -102,6 +107,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   if (args.length > 1) throw new Error('usage: launch.mjs [runId] [--no-host]');
   const root = resolve(process.env.OPENMINUTES_ROOT ?? resolve(import.meta.dirname, '../../../..'));
   const runId = args[0] ?? `run-${randomUUID()}`;
-  const run = await launch(root, runId);
-  console.log(JSON.stringify({ runId, url: run.url, pid: run.pid, runDir: run.runDir, evidenceDir: run.evidenceDir }, null, 2));
+  const hostMode = process.argv.includes('--no-host') ? 'none' : (process.env.VERIFY_HOST_MODE ?? 'floatboat');
+  const run = await launch(root, runId, { hostMode });
+  console.log(JSON.stringify({ runId, url: run.url, pid: run.pid, runDir: run.runDir, evidenceDir: run.evidenceDir, hostMode }, null, 2));
 }

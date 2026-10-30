@@ -1,0 +1,22 @@
+[
+  {"goto":"#/rec/1"},
+  {"waitFor":".segment__jump"},
+  {"screenshot":"01-before.png"},
+  {"aria":"01-before.aria.txt"},
+  {"click":"text=AI 归类"},
+  {"waitText":"归类任务已排队"},
+  {"screenshot":"02-queued.png"},
+  {"aria":"02-queued.aria.txt"},
+  {"waitFor":".detail__actions button[title='用 AI 归类并生成摘要']:not(:disabled)","timeout":120000},
+  {"expectText":"重新归类"},
+  {"expectNoText":"上次处理未成功"},
+  {"click":"text=AI 结论"},
+  {"waitFor":".analysis"},
+  {"screenshot":"03-analysis.png"},
+  {"aria":"03-analysis.aria.txt"},
+  {"eval":"fetch('/api/recordings/1').then(r => r.json()).then(({data:d}) => { const a = d.analysis, r = d.recording; if (!a || r.status !== 'organized' || !r.title || !r.summary || !r.categoryId || !r.tags.length || !a.keyPoints.length || !a.actionItems.length || r.importance < 1 || r.importance > 5) throw Error('incomplete AI result'); if (r.title !== a.title || r.summary !== a.summary || r.importance !== a.importance) throw Error('AI persistence mismatch'); if (location.hash !== '#/rec/1') throw Error('route changed'); return d; })"},
+  {"click":"text=执行记录 2"},
+  {"expectText":"成功"},
+  {"screenshot":"04-jobs.png"},
+  {"aria":"04-jobs.aria.txt"}
+]
