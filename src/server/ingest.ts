@@ -9,6 +9,7 @@ import type { ImportDirectoryState, IngestScanResult, ParsedDeviceFile } from '.
 import { fileSize, probeDurationSec } from './media';
 import { nowIso, num, row, run, str, strOr, touchRecording, writeSetting } from './sql';
 import { ensureMonthDir, expandHome, resolveStoredPath } from './library';
+import { canonicalPath, containsPath, portableFilename, sameDirectory } from './paths';
 
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac', '.amr', '.opus']);
 
@@ -22,8 +23,7 @@ export class IngestError extends Error {
 }
 
 export function sanitizeFilename(name: string): string {
-  const base = path.basename(name).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
-  return base.length > 0 ? base.slice(0, 160) : `recording-${Date.now()}`;
+  return portableFilename(name);
 }
 
 /** 从文件名里识别常见录音时间戳；识别不到时用文件修改时间。 */
@@ -286,19 +286,13 @@ export const DEFAULT_IMPORT_DIR = path.join(os.homedir(), 'memo', 'memotalk', 'i
 
 /** 系统临时目录随时会被清理，不能当作长期导入目录。 */
 function isTemporaryPath(directory: string): boolean {
-  const resolved = path.resolve(directory).toLowerCase();
-  const temp = path.resolve(os.tmpdir()).toLowerCase();
-  return resolved === temp || resolved.startsWith(`${temp}${path.sep}`);
+  return containsPath(canonicalPath(os.tmpdir()), canonicalPath(directory), process.platform);
 }
 
 export interface ResolvedImportDir {
   directory: string;
   isDefault: boolean;
   resetFrom: string | null;
-}
-
-function sameDirectory(a: string, b: string): boolean {
-  return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 }
 
 /** 设置值优先；为空或落在系统临时目录时回落到默认收件目录。 */

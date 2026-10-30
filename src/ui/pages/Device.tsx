@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { Copy, FolderPlus, HardDriveDownload, ListTree, PlugZap, RefreshCw, ScanLine, TerminalSquare } from 'lucide-react';
 import type {
   BridgeRunResult,
-  DeviceEnv,
   DeviceState,
   DeviceStatus,
   ImportDirectoryState,
@@ -18,22 +17,10 @@ import { useAsyncData } from '../useApi';
 import { Button, Card, ErrorState, Field, Loading, useToast } from '../components/ui';
 import { SdkCommandTable } from '../components/SdkCommandTable';
 import { PendingPullList } from '../components/PendingPullList';
+import { EnvironmentPanel } from '../components/EnvironmentPanel';
 
 interface Props {
   onNavigate: (route: string) => void;
-}
-
-function EnvRow({ label, probe }: { label: string; probe: { ok: boolean; detail: string } }) {
-  return (
-    <li className={`env__row${probe.ok ? ' env__row--ok' : ' env__row--bad'}`}>
-      <span className="env__dot" aria-hidden="true" />
-      <span className="env__label">{label}</span>
-      <span className="env__detail" title={probe.detail}>
-        {probe.detail}
-      </span>
-      <span className="env__state">{probe.ok ? '就绪' : '未就绪'}</span>
-    </li>
-  );
 }
 
 function parseManifestText(text: string): ParsedDeviceFile[] {
@@ -67,6 +54,7 @@ export function DevicePage({ onNavigate }: Props) {
   const pendingList = useAsyncData<RecordingListResult>(() => api.get<RecordingListResult>('/api/recordings?limit=100'), 'device-pending');
   const [scan, setScan] = useState<IngestScanResult | null>(null);
   const [importDir, setImportDir] = useState<string | null>(null);
+  const [environmentRevision, setEnvironmentRevision] = useState(0);
 
   if (state.loading && !state.data) return <Loading label="正在检测本机环境" />;
   if (state.error) return <ErrorState message={state.error} onRetry={state.reload} />;
@@ -81,6 +69,7 @@ export function DevicePage({ onNavigate }: Props) {
     setBusy('check');
     try {
       await api.post('/api/device/check');
+      setEnvironmentRevision((value) => value + 1);
       state.reload();
       toast.push('环境检测已刷新', 'success');
     } catch (error) {
@@ -275,27 +264,11 @@ export function DevicePage({ onNavigate }: Props) {
       </header>
 
       <div className="device-grid">
-        <Card title="本机环境" action={<span className="muted">检测于 {formatDateTime(data.env.checkedAt)}</span>}>
-          <ul className="env">
-            <EnvRow label="Python" probe={data.env.python} />
-            <EnvRow label="bleak 依赖" probe={data.env.bleak} />
-            <EnvRow label="memotalk-sdk" probe={data.env.sdk} />
-            <EnvRow label="ffmpeg" probe={data.env.ffmpeg} />
-            {data.capabilities.map((item) => (
-              <EnvRow key={item.domain} label={item.domain} probe={item} />
-            ))}
-          </ul>
-          {!data.env.sdk.ok || !data.env.bleak.ok ? (
-            <p className="notice">
-              BLE 通道需要 memotalk-sdk。在终端执行 <code>uv pip install --python "{data.env.python.resolvedPath ?? 'python'}" memotalk-sdk</code>
-              后重新检测；未安装时仍可使用「目录导入」与「手动登记清单」。
-            </p>
-          ) : null}
-        </Card>
+        <EnvironmentPanel revision={environmentRevision} />
 
         <Card title="路径设置">
           <Field label="导入目录" hint="录音笔文件下载到这个目录后，扫描即可入库；留空时使用默认收件目录">
-            <input value={effectiveImport} onChange={(event) => setImportDir(event.target.value)} placeholder="C:\\Users\\me\\memo\\memotalk\\inbox" />
+            <input value={effectiveImport} onChange={(event) => setImportDir(event.target.value)} placeholder="~/memo/memotalk/inbox" />
           </Field>
           <div className="card__actions">
             <Button variant="primary" size="sm" disabled={busy === 'save'} onClick={() => void savePaths()}>
@@ -425,7 +398,7 @@ export function DevicePage({ onNavigate }: Props) {
           ) : null}
           {importState?.resetFrom ? (
             <p className="notice">
-              原先保存的目录 <code>{importState.resetFrom}</code> 位于系统临时目录，已被 Windows 清理，这里已自动改用默认收件目录。
+              原先保存的目录 <code>{importState.resetFrom}</code> 位于可能被系统清理的临时目录，这里已自动改用默认收件目录。
             </p>
           ) : null}
           <div className="card__actions">

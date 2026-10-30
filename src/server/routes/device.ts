@@ -12,6 +12,7 @@ import { libraryRoot } from '../library';
 import { downloadOne } from '../pull';
 import { listCategories } from '../repo';
 import { num, numOr, readSetting, readSettings, row, rows, run, str, strOr, writeSetting } from '../sql';
+import type { appPreflight } from '../preflight';
 
 
 async function readCapabilities(host: { capabilities: { list: (input?: { domain?: string }) => Promise<{ capabilities: Array<{ operation: string; status: string; declared: boolean }> }> } }) {
@@ -76,14 +77,14 @@ function readDevices(app: WorkbenchServer): DeviceState['devices'] {
   }));
 }
 
-export function registerDeviceRoutes(app: WorkbenchServer): void {
+export function registerDeviceRoutes(app: WorkbenchServer, preflight?: ReturnType<typeof appPreflight>): void {
   app.route(
     'GET',
     '/api/device',
     api(async (context): Promise<DeviceState> => {
       const settings = readSettings(context.database);
       return {
-        env: await probeEnvironment(context.database),
+        env: preflight ? (await preflight.get()).env : await probeEnvironment(context.database),
         commands: readCommands(app),
         capabilities: await readCapabilities(context.host),
         devices: readDevices(app),
@@ -91,13 +92,6 @@ export function registerDeviceRoutes(app: WorkbenchServer): void {
       };
     }),
   );
-
-  app.route(
-    'POST',
-    '/api/device/check',
-    api((context) => probeEnvironment(context.database)),
-  );
-
 
   app.route(
     'POST',

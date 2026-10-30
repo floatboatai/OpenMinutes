@@ -13,6 +13,7 @@ import { registerPipelineRoutes } from './routes/pipeline';
 import { registerRecordingRoutes } from './routes/recordings';
 import { registerSettingRoutes } from './routes/settings';
 import { recoverInterruptedTasks } from './sql';
+import { registerEnvironmentRoutes } from './routes/environment';
 
 const app = await createWorkbenchServer(import.meta.url);
 
@@ -25,8 +26,10 @@ registerCategoryRoutes(app);
 registerIngestRoutes(app);
 registerMediaRoutes(app);
 registerLiveRoutes(app);
-registerDeviceRoutes(app);
+const preflight = registerEnvironmentRoutes(app);
+registerDeviceRoutes(app, preflight);
 registerSettingRoutes(app);
 
 startAutoConnect(app);
 await app.listen();
+void preflight.get().catch((error) => console.error('preflight failed', error));

@@ -9,7 +9,7 @@ import type { LiveState } from '../contracts/app';
 import { probePython, probeSdk, pythonRuntimeEnv, resolveFfmpeg } from './bridge';
 import { autoTranscribeIfEnabled, queueOrganization } from './jobs';
 import { ensureMonthDir, libraryRoot } from './library';
-import { fileSize } from './media';
+import { fileSize, terminateChild } from './media';
 import { nowIso, readSetting, row, run } from './sql';
 import { liveScriptSource } from './live-script';
 import { finishLiveAsr, pumpFrames } from './live-asr';
@@ -188,6 +188,19 @@ export async function startLive(app: WorkbenchServer): Promise<LiveState> {
     );
     session.python = python;
     session.ffmpeg = ffmpeg;
+    for (const child of [python, ffmpeg]) {
+      child.stdin.on('error', (error) => {
+        if (!session.stopping) {
+          session.status = 'error';
+          session.message = error.message;
+        }
+      });
+    }
+    ffmpeg.on('error', (error) => {
+      session.status = 'error';
+      session.message = error.message;
+      terminateChild(python);
+    });
     session.fileStream = createWriteStream(filePath);
 
     python.stdout.on('data', (chunk: Buffer) => {
@@ -255,7 +268,7 @@ export async function stopLive(app: WorkbenchServer): Promise<LiveState> {
   try {
     if (session.python && !session.python.killed && !session.exited) {
       try {
-        session.python.stdin.write('stop\n');
+        session.python.stdin.end('stop\n');
       } catch {
         /* stdin 可能已关闭 */
       }
@@ -266,7 +279,7 @@ export async function stopLive(app: WorkbenchServer): Promise<LiveState> {
           resolve();
         });
       });
-      if (!session.exited) session.python.kill();
+      if (!session.exited) terminateChild(session.python);
     }
 
     if (session.ffmpeg) {
@@ -278,7 +291,7 @@ export async function stopLive(app: WorkbenchServer): Promise<LiveState> {
           resolve();
         });
       });
-      if (session.ffmpeg.exitCode === null) session.ffmpeg.kill();
+      if (session.ffmpeg.exitCode === null) terminateChild(session.ffmpeg);
     }
 
     const text = await finishLiveAsr(session);

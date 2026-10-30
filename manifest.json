@@ -15,7 +15,7 @@
   "server": "dist/server/index.mjs",
   "ui": "dist/ui",
   "migrations": "migrations",
-  "capabilities": ["llm", "asr"],
+  "capabilities": ["llm", "asr", "agent"],
   "contributions": [],
   "dependencies": [],
   "resources": [
