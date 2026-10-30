@@ -3,9 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "packageManager": "pnpm@10.28.2",
   "scripts": {
     "start": "node --enable-source-maps dist/server/index.mjs",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "test:verification": "node --test .claude/skills/verify-openminutes/scripts/*.test.mjs",
+    "test:ci": "node scripts/check-test-dependencies.mjs && pnpm test && pnpm test:verification"
   },
   "engines": {
     "node": ">=22.16.0"
