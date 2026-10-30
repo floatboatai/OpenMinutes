@@ -104,6 +104,8 @@ test('fresh launch authenticates before PATCH, cleanup stops only that child, ID
   assert.equal(alive(run.pid), true);
   assert.equal(readFileSync(join(root, 'requests.log'), 'utf8'), 'GET /__workbench/health\nPATCH /api/settings\n');
   assert.equal(JSON.parse(readFileSync(join(run.runDir, 'run.json'), 'utf8')).pid, run.pid);
+  assert.equal(run.hostMode, 'none');
+  assert.equal(JSON.parse(readFileSync(join(run.runDir, 'workbench-config.json'), 'utf8')).hostConnection, undefined);
   await cleanup(root, 'success');
   assert.equal(alive(run.pid), false);
   assert.equal(existsSync(run.runDir), false);

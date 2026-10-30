@@ -11,7 +11,7 @@ import { sqliteRepairStore } from '../src/server/repair-store.ts';
 
 function testStore(t: { after: (fn: () => void) => void }) {
   const db = new DatabaseSync(':memory:');
-  db.exec(readFileSync(new URL('../migrations/0005_environment_repair.sql', import.meta.url), 'utf8'));
+  db.exec(readFileSync(new URL('../migrations/0006_environment_repair.sql', import.meta.url), 'utf8'));
   t.after(() => db.close());
   return sqliteRepairStore(db, '/app');
 }

@@ -88,7 +88,7 @@ confirmation; privacy permissions cannot be automated.
 
 Preflight reports are process-local caches. Repair intent, idempotency key,
 run ID and state are now persisted in SQLite, keyed by working directory
-(`0005_environment_repair.sql`). The intent commits before `agent.start`.
+(`0006_environment_repair.sql`). The intent commits before `agent.start`.
 Restarting only queries the saved task, using its run ID or original key;
 it never starts or resubmits a repair automatically. A missing result or
 failed query stays `unknown`, blocks new submissions and retains its key.

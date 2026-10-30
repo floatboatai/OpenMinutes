@@ -24,7 +24,7 @@ for (const phase of ['before-submit', 'accepted-before-response', 'run-id-saved'
       const root = await mkdtemp(path.join(os.tmpdir(), 'openminutes-recovery-'));
       const filename = path.join(root, 'repair.sqlite');
       let db = new DatabaseSync(filename);
-      db.exec(await readFile(new URL('../migrations/0005_environment_repair.sql', import.meta.url), 'utf8'));
+      db.exec(await readFile(new URL('../migrations/0006_environment_repair.sql', import.meta.url), 'utf8'));
       const intent: RepairState = { status: phase === 'terminal-saved' ? 'completed' : phase === 'run-id-saved' ? 'running' : 'starting',
         idempotencyKey: 'durable-intent', runId: ['run-id-saved', 'terminal-saved'].includes(phase) ? 'existing-run' : null, text: 'before crash' };
       sqliteRepairStore(db, '/app').save(intent);
@@ -83,7 +83,7 @@ for (const phase of ['before-submit', 'accepted-before-response', 'run-id-saved'
 
 test('intent is committed before start; response lost across disposal recovers by original key', async () => {
   const db = new DatabaseSync(':memory:');
-  db.exec(await readFile(new URL('../migrations/0005_environment_repair.sql', import.meta.url), 'utf8'));
+  db.exec(await readFile(new URL('../migrations/0006_environment_repair.sql', import.meta.url), 'utf8'));
   const store = sqliteRepairStore(db, '/app');
   const host = createHostClient(undefined);
   host.capabilities.list = async () => ({ sdkVersion: '1', capabilities: ['start', 'get'].map((operation) => ({
@@ -146,7 +146,7 @@ test('failed intent persistence prevents remote submission', async () => {
 
 test('corrupt durable journal fails closed rather than treating it as a fresh repair', async () => {
   const db = new DatabaseSync(':memory:');
-  db.exec(await readFile(new URL('../migrations/0005_environment_repair.sql', import.meta.url), 'utf8'));
+  db.exec(await readFile(new URL('../migrations/0006_environment_repair.sql', import.meta.url), 'utf8'));
   try {
     db.prepare('INSERT INTO environment_repairs VALUES (?, ?)').run('/app', '{"status":"running"}');
     assert.throws(() => createEnvironmentRepair({
