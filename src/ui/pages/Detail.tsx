@@ -22,6 +22,7 @@ import {
   useToast,
 } from '../components/ui';
 import { AnalysisView, JobsTable, MetaList, TranscriptSegments } from '../components/recording-parts';
+import { CalendarAssociation } from '../components/CalendarAssociation';
 
 interface Props {
   id: number;
@@ -359,6 +360,10 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
         </div>
 
         <aside className="detail__side">
+          <Card title="日历事件">
+            <CalendarAssociation id={id} eventId={recording.calendarEventId} revision={recording.status} onChanged={detail.reload} />
+            <a href="#/calendar">在日历视图中关联或新建事件</a>
+          </Card>
           <Card title="整理">
             <Field label="分类">
               <select

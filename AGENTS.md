@@ -28,3 +28,29 @@
 - 独立启动的服务不能把导入目录放在系统临时目录（`%TEMP%`），否则应用会把它改回真实的 `~/memo/memotalk/inbox`。scratch 数据放在 `.workbench/` 下（已被 gitignore）。
 - PowerShell 调用 `browse.mjs` 时，`@file` 参数必须整体加引号，例如 `'@.claude/skills/verify-openminutes/recipes/host-single.json'`；裸写 `@.claude/...` 会被 PowerShell 解析成语法而报错。
 - Windows 下 `rg` 的目录参数不要写 `sdk/*`，使用 `rg <pattern> sdk` 或 `rg --files sdk -g '<glob>'`。先用 `rg --files` 定位再读文件；Floatboat 的 SDK 位于 `resources/workbench-sdk/`，不在 `workbench-toolchain/sdk/`。
+## Repository rules
+
+- Use Chinese for user-facing communication.
+- Use only AGENTS.md for repository instructions; do not create CLAUDE.md.
+- Run Python through `uv run`; use `pnpm` for Node packages.
+- New repositories are private unless explicitly requested otherwise.
+
+## PowerShell pitfalls
+
+- Check `Test-Path` before reading optional instruction files. This checkout
+  originally had no root AGENTS.md; assuming it existed caused Get-Content to fail.
+- Keep filesystem operations in PowerShell and use literal, resolved paths.
+- Pass complex browser steps through a JSON file, not nested shell quoting.
+- `git check-ignore` returns exit 1 when a path is not ignored; this is not a
+  filesystem failure. Use `git ls-files` to check whether it is already tracked.
+- On Windows, verification cleanup can hit EPERM immediately after stopping its
+  server because file handles are still closing. Re-run the same nonce-scoped
+  cleanup after the process exits; never kill unrelated processes or broaden
+  the deletion target.
+- PowerShell does not expand `sdk/*.mjs` for ripgrep. Search the directory with
+  `rg -g '*.mjs' pattern sdk` instead of passing a wildcard path.
+- The pinned verification skill's `text=` selector does not match `strong`.
+  Use a specific button CSS selector when its label is rendered in `strong`.
+- For verification readbacks separated by long browser sessions, request
+  `Connection: close`; a stale Node fetch keep-alive socket produced ECONNRESET
+  even though the isolated server's doctor and logs remained healthy.

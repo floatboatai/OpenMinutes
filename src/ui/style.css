@@ -961,7 +961,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
   .sidebar { position: static; height: auto; flex-direction: row; align-items: center; gap: 12px; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--app-border); overflow-x: auto; }
   .brand__sub, .sidebar__foot { display: none; }
   .nav { flex-direction: row; gap: 2px; }
-  .nav__item { padding: 6px 9px; font-size: 12.5px; }
+  .nav__item { padding: 6px 9px; font-size: 12.5px; flex: 0 0 auto; white-space: nowrap; }
   .main { padding: 18px 16px 48px; }
   .stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .analysis__cols { grid-template-columns: minmax(0, 1fr); }
@@ -974,6 +974,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 }
 
 @media (max-width: 560px) {
+  .sidebar { flex-direction: column; align-items: stretch; overflow: visible; }
+  .nav { overflow-x: auto; min-width: 0; padding-bottom: 4px; }
   .stat-row { grid-template-columns: minmax(0, 1fr); }
   .page__head { flex-direction: column; align-items: stretch; }
   .segments { gap: 8px; }

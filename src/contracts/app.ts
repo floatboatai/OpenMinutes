@@ -42,6 +42,7 @@ export interface RecordingSummary {
   source: RecordingSource;
   status: RecordingStatus;
   categoryId: number | null;
+  calendarEventId: number | null;
   categoryName: string | null;
   categoryColor: string | null;
   durationSec: number | null;

@@ -21,7 +21,7 @@ const RECORDING_SELECT = `
   SELECT r.id, r.filename, r.title, r.source, r.status, r.category_id,
          r.duration_sec, r.size_bytes, r.recorded_at, r.created_at, r.importance,
          r.summary, r.is_favorite, r.is_archived, r.device_serial, r.storage_path,
-         r.last_error,
+         r.last_error, r.calendar_event_id,
          LENGTH(COALESCE(r.transcript_text, '')) AS transcript_chars,
          c.name AS category_name, c.color AS category_color
     FROM recordings r
@@ -69,6 +69,7 @@ function toSummary(source: Record<string, unknown>, tagMap: Map<number, Array<{ 
     source: strOr(source.source, 'folder_import') as RecordingSource,
     status,
     categoryId: num(source.category_id),
+    calendarEventId: num(source.calendar_event_id),
     categoryName: str(source.category_name),
     categoryColor: str(source.category_color),
     durationSec: num(source.duration_sec),
