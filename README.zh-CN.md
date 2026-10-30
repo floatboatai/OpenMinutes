@@ -78,6 +78,17 @@ SDK 会自动安装 `bleak`；无需克隆 SDK 源码或配置 SDK 目录。
 设置环境变量 `MEMOTALK_TEST_PYTHON` 为安装了 `memotalk-sdk` 的解释器路径后运行。
 未设置时跳过 SDK 集成用例，设置接口与迁移测试仍会执行。
 
+### CI
+
+GitHub Actions 在 PR 和推送到 `main` 时运行 `pnpm test:ci`，覆盖 Ubuntu、Windows
+以及 Node 22、24。工作流安装持久的 Python 3.12 环境、`memotalk-sdk==0.1.0`、
+uv、ffmpeg 和 ffprobe。CI 命令先检查依赖，缺失即失败，再执行应用测试及验证工具
+回归测试（`pnpm test:verification`）。Windows 还会运行 WinRT 导入和离线 TTS
+测试；Linux 跳过这两项平台专属测试。
+
+Floatboat 编译器构建、浏览器验收、真实 BLE 设备和付费 ASR/LLM 调用不属于这个
+工作流，仍通过 `.claude/skills/verify-openminutes` 在本地单独验证。
+
 ## 目录结构
 
 ```text

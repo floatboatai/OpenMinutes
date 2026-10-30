@@ -78,6 +78,20 @@ Upgrading removes the old `sdk_dir` setting while preserving other path, recogni
 Set the `MEMOTALK_TEST_PYTHON` environment variable to the path of a Python interpreter with `memotalk-sdk` installed before running them.
 Without this variable, SDK integration tests are skipped; settings API and migration tests still run.
 
+### CI
+
+GitHub Actions runs `pnpm test:ci` on pull requests and pushes to `main`, using
+Ubuntu and Windows with Node 22 and 24. It installs a persistent Python 3.12
+environment with `memotalk-sdk==0.1.0`, plus uv, ffmpeg and ffprobe. The CI command
+fails if these prerequisites are missing, then runs both the application tests
+and the verification helper regressions (`pnpm test:verification`).
+Windows also runs the WinRT import and offline TTS tests; those platform-specific
+tests are skipped on Linux.
+
+Floatboat compiler builds, browser acceptance, physical BLE devices and paid
+ASR/LLM calls are not part of this workflow. They remain separate local
+verification steps under `.claude/skills/verify-openminutes`.
+
 ## Project structure
 
 ```text
