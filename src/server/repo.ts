@@ -30,6 +30,9 @@ const RECORDING_SELECT = `
 const STAGE_FILTERS: Record<string, string> = {
   'need-transcribe': "r.status IN ('pending', 'ready')",
   'need-organize': "r.status = 'transcribed'",
+  pending: "r.status = 'pending'",
+  ready: "r.status = 'ready'",
+  transcribed: "r.status = 'transcribed'",
   busy: "r.status IN ('transcribing', 'analyzing')",
   done: "r.status = 'organized'",
   failed: "r.status = 'failed'",
@@ -201,7 +204,7 @@ function toAnalysis(source: Record<string, unknown> | undefined): AnalysisRecord
 }
 
 export function readRecordingDetail(db: DatabaseSync, id: number): RecordingDetail | null {
-  const detail = row(db, 'SELECT id, storage_path, last_error FROM recordings WHERE id = ?', [id]);
+  const detail = row(db, 'SELECT id, storage_path, last_error, last_error_code, last_error_detail FROM recordings WHERE id = ?', [id]);
   if (!detail) return null;
   const summary = readRecordingSummary(db, id);
   if (!summary) return null;
@@ -247,6 +250,8 @@ export function readRecordingDetail(db: DatabaseSync, id: number): RecordingDeta
     analysis,
     jobs,
     lastError: str(detail.last_error),
+    lastErrorCode: str(detail.last_error_code),
+    lastErrorDetail: str(detail.last_error_detail),
     storagePath: str(detail.storage_path),
   };
 }
@@ -324,35 +329,6 @@ export function buildOverview(db: DatabaseSync): Overview {
     'SELECT status, COUNT(*) AS n FROM recordings WHERE is_archived = 0 GROUP BY status',
   ).map((item) => ({ status: strOr(item.status, 'pending') as RecordingStatus, count: numOr(item.n, 0) }));
 
-  const deviceRow = row(
-    db,
-    `SELECT serial, model, firmware, battery_pct, free_space_pct, last_seen_at
-       FROM devices ORDER BY COALESCE(last_seen_at, created_at) DESC LIMIT 1`,
-  );
-  const lastSeenAt = deviceRow ? str(deviceRow.last_seen_at) : null;
-  const seenRecently = lastSeenAt ? Date.now() - new Date(lastSeenAt).getTime() < 6 * 60 * 1000 : false;
-  const pendingPulls = numOr(
-    row(db, "SELECT COUNT(*) AS n FROM recordings WHERE is_archived = 0 AND status = 'pending'")?.n,
-    0,
-  );
-  const readyToTranscribe = numOr(
-    row(db, "SELECT COUNT(*) AS n FROM recordings WHERE is_archived = 0 AND status = 'ready'")?.n,
-    0,
-  );
-  const device = deviceRow
-    ? {
-        serial: strOr(deviceRow.serial, ''),
-        model: strOr(deviceRow.model, 'MemoTalk S1'),
-        firmware: str(deviceRow.firmware),
-        batteryPct: num(deviceRow.battery_pct),
-        freeSpacePct: num(deviceRow.free_space_pct),
-        lastSeenAt,
-        connected: seenRecently,
-        pendingPulls,
-        readyToTranscribe,
-      }
-    : null;
-
   return {
     totalRecordings: numOr(totals?.total, 0),
     totalDurationSec: numOr(totals?.duration, 0),
@@ -365,6 +341,5 @@ export function buildOverview(db: DatabaseSync): Overview {
     byCategory,
     byStatus,
     recent: listRecordings(db, { limit: 5, sort: 'recorded' }).items,
-    device,
   };
 }

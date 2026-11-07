@@ -16,6 +16,18 @@ test('dependency failures expose actions but healthy dependencies do not offer r
   assert.match(result.find((item) => item.id === 'sdk')?.action ?? '', /uv run/);
 });
 
+test('items are grouped and labels stay free of package names; raw probe text lives in detail', () => {
+  const failed = { ok: false, detail: "ModuleNotFoundError: No module named 'memotalk' (uv pip install memotalk-sdk bleak)", resolvedPath: null };
+  const items = dependencyChecks({ python: failed, bleak: failed, sdk: failed, ffmpeg: failed, checkedAt: '' });
+  assert.deepEqual(items.map((item) => item.group), ['device', 'device', 'device', 'audio']);
+  for (const item of items) {
+    assert.doesNotMatch(`${item.label} ${item.reason}`, /bleak|memotalk|uv |ModuleNotFound/i, item.id);
+    assert.match(item.detail ?? '', /memotalk-sdk/);
+  }
+  assert.equal(capabilityCheck('asr', []).group, 'ai');
+  assert.equal(capabilityCheck('llm', []).label, 'AI 整理');
+});
+
 for (const platform of ['win32', 'darwin', 'linux'] as const) {
   test(`${platform}: cache and concurrent refresh run only one inspection`, async () => {
     let calls = 0;
@@ -58,7 +70,7 @@ test('Host checks require actual operations and declaration; unavailable Host is
     throw new Error('HOST_NOT_CONNECTED');
   } } });
   assert.deepEqual(calls.sort(), ['agent', 'asr', 'llm']);
-  assert.ok(result.every((item) => item.status === 'warn' && /HOST_NOT_CONNECTED/.test(item.reason)));
+  assert.ok(result.every((item) => item.status === 'warn' && /HOST_NOT_CONNECTED/.test(item.detail ?? '') && !/HOST_NOT_CONNECTED/.test(item.reason)));
 });
 
 test('directory probe creates only its marker and removes it; blocked paths fail', async () => {

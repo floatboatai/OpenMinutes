@@ -4,11 +4,12 @@ import { mkdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import type { WorkbenchServer } from '../../../sdk/runtime.mjs';
 import type { RecordingDetail, RecordingListResult } from '../../contracts/app';
-import { asObject, optBool, optInt, optString, optStringArray, pathParam } from '../../contracts/input';
+import { asObject, BadInput, optBool, optInt, optString, optStringArray, pathParam } from '../../contracts/input';
 import { api } from '../http';
 import { listRecordings, readRecordingDetail } from '../repo';
 import { pruneTags, readTags, row, run, str, syncTags } from '../sql';
 import { libraryRoot, resolveAudioFile } from '../library';
+import { linkCalendarRecording } from '../calendar';
 
 export function registerRecordingRoutes(app: WorkbenchServer): void {
   app.route(
@@ -65,6 +66,11 @@ export function registerRecordingRoutes(app: WorkbenchServer): void {
       const isFavorite = optBool(body, 'isFavorite');
       const isArchived = optBool(body, 'isArchived');
       const tags = optStringArray(body, 'tags', 24);
+      const calendarEventId = body.calendarEventId;
+      if (calendarEventId !== undefined && calendarEventId !== null
+        && (typeof calendarEventId !== 'number' || !Number.isSafeInteger(calendarEventId) || calendarEventId <= 0)) {
+        throw new BadInput('calendarEventId 必须是正整数或 null');
+      }
 
       if (title !== undefined) run(context.database, 'UPDATE recordings SET title = ? WHERE id = ?', [title || null, id]);
       if (summary !== undefined) run(context.database, 'UPDATE recordings SET summary = ? WHERE id = ?', [summary || null, id]);
@@ -76,6 +82,8 @@ export function registerRecordingRoutes(app: WorkbenchServer): void {
         if (!category) throw Object.assign(new Error('分类不存在'), { code: 'BAD_CATEGORY' });
         run(context.database, 'UPDATE recordings SET category_id = ? WHERE id = ?', [categoryId, id]);
       }
+      // 录音与日程的唯一关联入口（日历页 EventLinker）。
+      if (calendarEventId !== undefined) linkCalendarRecording(context.database, id, calendarEventId as number | null);
       if (tags !== undefined) {
         syncTags(context.database, id, tags, 'user', true);
         pruneTags(context.database);

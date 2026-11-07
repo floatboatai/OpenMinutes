@@ -1,8 +1,15 @@
+export type PreflightGroup = 'device' | 'audio' | 'ai' | 'storage';
+
 export interface PreflightItem {
   id: string;
   label: string;
+  /** 展示分组：录音笔组件 / 音频处理 / 语音识别与 AI 整理 / 存储目录。 */
+  group: PreflightGroup;
   status: 'ok' | 'warn' | 'fail';
+  /** 一句中文结论。 */
   reason: string;
+  /** 技术原文（探测输出、uv 命令、平台说明），只在「查看详情」里显示。 */
+  detail?: string;
   autoRepair: boolean;
   action: string;
 }

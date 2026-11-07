@@ -1,12 +1,16 @@
-import { useRef, useState } from 'react';
+// ABOUTME: 日历页：按日查看事件与录音、录音与日程的唯一关联入口（EventLinker）、新建事件、导入日历与生成纪要。
+
+import { useEffect, useRef, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, Copy, Download, FileAudio, Plus, RefreshCw, Sparkles, Upload } from 'lucide-react';
 import type { CalendarEvent, CalendarRecording } from '../../contracts/calendar';
-import type { RecordingDetail } from '../../contracts/app';
-import { api, errorText } from '../api';
+import type { AppErrorView } from '../../contracts/errors';
+import { api, ApiError, toErrorView } from '../api';
 import { useAsyncData } from '../useApi';
 import { Button, Empty, ErrorState, Field, IconButton, Loading, Modal, useToast } from '../components/ui';
 import { formatDuration } from '../format';
-import { CalendarAssociation } from '../components/CalendarAssociation';
+import { buildHash } from '../router';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { EventLinker } from '../components/EventLinker';
 
 export function localDay(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -45,7 +49,7 @@ export function DigestDocument({ title, text }: { title: string; text: string })
       <h2>{title}</h2>
       <div className="page__actions">
         <IconButton label="复制 Markdown" onClick={() => void navigator.clipboard.writeText(text).then(
-          () => toast.push('已复制纪要', 'success'), (error: unknown) => toast.push(errorText(error), 'error'),
+          () => toast.push('已复制纪要', 'success'), (error: unknown) => toast.error(error),
         )}><Copy size={16} /></IconButton>
         <IconButton label="导出 Markdown" onClick={() => {
           const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
@@ -61,33 +65,18 @@ export function DigestDocument({ title, text }: { title: string; text: string })
   </section>;
 }
 
-export function CalendarRecordingDetail({ id }: { id: number }) {
-  const detail = useAsyncData(() => api.get<RecordingDetail>(`/api/recordings/${id}`), `calendar-detail:${id}`);
-  if (detail.error) return <ErrorState message={detail.error} onRetry={detail.reload} />;
-  if (detail.loading || !detail.data) return <Loading />;
-  const data = detail.data;
-  return <section className="calendar-transcript">
-    <div className="calendar-panel-head"><h2>{data.recording.title || data.recording.filename}</h2></div>
-    <a href={`#/rec/${id}`}>打开录音详情</a>
-    <h3>摘要</h3><p>{data.recording.summary || '尚无摘要'}</p>
-    {data.analysis ? <><h3>关键点</h3><ul>{data.analysis.keyPoints.map((point, i) => <li key={i}>{point}</li>)}</ul>
-      <h3>待办事项</h3><ul>{data.analysis.actionItems.map((point, i) => <li key={i}>{point}</li>)}</ul></> : null}
-    <h3>转录全文</h3><p className="calendar-markdown">{data.transcript?.text || '尚无转录文本'}</p>
-  </section>;
-}
-
 function CreateEvent({ day, onClose, onCreated }: { day: string; onClose: () => void; onCreated: (event: CalendarEvent) => void }) {
   const [summary, setSummary] = useState('');
   const [start, setStart] = useState(`${day}T09:00`);
   const [end, setEnd] = useState(`${day}T10:00`);
   const [location, setLocation] = useState('');
   const [attendees, setAttendees] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState<AppErrorView | null>(null);
   const [busy, setBusy] = useState(false);
   return <Modal title="新建日历事件" onClose={onClose}>
     <form className="calendar-form" onSubmit={(event) => {
       event.preventDefault();
-      setBusy(true); setError('');
+      setBusy(true); setError(null);
       void (async () => {
         try {
           const created = await api.post<CalendarEvent>('/api/calendar/events', {
@@ -95,7 +84,7 @@ function CreateEvent({ day, onClose, onCreated }: { day: string; onClose: () => 
             location, attendees: attendees.split(/[,，]/).map((item) => item.trim()).filter(Boolean),
           });
           onCreated(created);
-        } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); }
+        } catch (cause) { setError(toErrorView(cause)); } finally { setBusy(false); }
       })();
     }}>
       <Field label="事件标题"><input required maxLength={300} value={summary} onChange={(e) => setSummary(e.target.value)} /></Field>
@@ -103,23 +92,30 @@ function CreateEvent({ day, onClose, onCreated }: { day: string; onClose: () => 
       <Field label="结束时间"><input required type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} /></Field>
       <Field label="地点"><input maxLength={1000} value={location} onChange={(e) => setLocation(e.target.value)} /></Field>
       <Field label="参会人"><input placeholder="姓名，以逗号分隔" value={attendees} onChange={(e) => setAttendees(e.target.value)} /></Field>
-      {error ? <p className="alert" role="alert">{error}</p> : null}
+      {error ? <ErrorNotice error={error} /> : null}
       <Button type="submit" variant="primary" disabled={busy} icon={<Plus size={15} />}>{busy ? '正在创建' : '创建事件'}</Button>
     </form>
   </Modal>;
 }
 
 type Selection = { kind: 'day'; day: string } | { kind: 'event'; day: string; id: number };
-type Panel = { kind: 'empty' } | { kind: 'recording'; id: number } | { kind: 'digest'; title: string; text: string };
+type Panel = { kind: 'empty' } | { kind: 'digest'; title: string; text: string };
 
-export function CalendarPage() {
+/** 截止日不早于目标日、且目标日落在 7 天窗口内。 */
+function windowEndFor(day: string, today: string): string {
+  return day > shiftDay(today, -7) && day <= today ? today : day;
+}
+
+export function CalendarPage({ day: focusDay, rec: focusRec }: { day?: string; rec?: number }) {
   const today = localDay(new Date());
-  const [endingDay, setEndingDay] = useState(today);
-  const [selection, setSelection] = useState<Selection>({ kind: 'day', day: today });
+  const initialDay = focusDay ?? today;
+  const [endingDay, setEndingDay] = useState(windowEndFor(initialDay, today));
+  const [selection, setSelection] = useState<Selection>({ kind: 'day', day: initialDay });
   const [panel, setPanel] = useState<Panel>({ kind: 'empty' });
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<{ linkTo: ((eventId: number) => Promise<void>) | null } | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(focusRec ?? null);
   const [busy, setBusy] = useState(false);
-  const [generationError, setGenerationError] = useState('');
+  const [generationError, setGenerationError] = useState<AppErrorView | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const toast = useToast();
   const firstDay = shiftDay(endingDay, -6);
@@ -131,8 +127,26 @@ export function CalendarPage() {
     ? `/api/calendar/events/${selection.id}/recordings`
     : `/api/calendar/recordings?${queryRange(selection.day)}`), `calendar-recordings:${JSON.stringify(selection)}`);
   const refresh = () => { events.reload(); recordings.reload(); };
+
+  // 从详情页带着 ?day=&rec= 进来：定位到那一天并展开那条录音的关联控件。
+  useEffect(() => {
+    if (!focusDay && !focusRec) return;
+    const day = focusDay ?? today;
+    setEndingDay(windowEndFor(day, today));
+    setSelection({ kind: 'day', day });
+    setPanel({ kind: 'empty' });
+    setExpanded(focusRec ?? null);
+  }, [focusDay, focusRec, today]);
+
+  useEffect(() => {
+    if (!focusRec || !recordings.data) return;
+    document.querySelector(`[data-recording-id="${focusRec}"]`)?.scrollIntoView({ block: 'center' });
+  }, [focusRec, recordings.data]);
+
   const choose = (next: Selection, event?: CalendarEvent) => {
-    setSelection(next); setGenerationError('');
+    setSelection(next); setGenerationError(null);
+    // 选中的日期写进哈希：从详情页返回时回到同一天。
+    window.history.replaceState(null, '', buildHash({ name: 'calendar', day: next.day }));
     setPanel(event?.digest ? { kind: 'digest', title: `${event.summary}纪要`, text: event.digest } : { kind: 'empty' });
   };
   const moveWeek = (offset: number) => {
@@ -140,18 +154,38 @@ export function CalendarPage() {
     setEndingDay(day); choose({ kind: 'day', day });
   };
   const generate = async (daily: boolean) => {
-    setBusy(true); setGenerationError(''); setPanel({ kind: 'empty' });
+    setBusy(true); setGenerationError(null); setPanel({ kind: 'empty' });
     try {
       const result = await api.post<{ digest: string }>(daily
         ? '/api/calendar/digest' : `/api/calendar/events/${selectedEvent?.id}/digest`,
       daily ? { ...dayRange(selection.day), day: selection.day } : {});
       setPanel({ kind: 'digest', title: daily ? `${selection.day} 日报` : `${selectedEvent?.summary}纪要`, text: result.digest });
       events.reload();
-    } catch (cause) { setGenerationError(errorText(cause)); } finally { setBusy(false); }
+    } catch (cause) { setGenerationError(toErrorView(cause)); } finally { setBusy(false); }
+  };
+  const importFile = (file: File) => {
+    if (file.size > 2 * 1024 * 1024) { toast.push('日历文件不能超过 2 MB', 'info'); return; }
+    setBusy(true);
+    void file.text().then((content) => {
+      const body = { filename: file.name, content };
+      if (new TextEncoder().encode(JSON.stringify(body)).length > 2000000) {
+        throw new ApiError('日历内容超出上传限制，请拆分后导入', 'INVALID_INPUT');
+      }
+      return api.post<{ imported: number; events: CalendarEvent[] }>('/api/calendar/import', body);
+    })
+      .then((result) => {
+        toast.push(`已导入 ${result.imported} 个日历事件`, 'success');
+        const first = result.events[0];
+        if (first) {
+          const day = first.allDay ? first.startTime.slice(0, 10) : localDay(new Date(first.startTime));
+          setEndingDay(day); choose({ kind: 'event', id: first.id, day }, first);
+        }
+        refresh();
+      }).catch((cause: unknown) => toast.error(cause)).finally(() => setBusy(false));
   };
   return <div className="page calendar-page">
     <header className="page__head">
-      <div><h1><CalendarDays size={22} /> 日历视图</h1><p className="page__sub">{firstDay} 至 {endingDay}</p></div>
+      <div><h1><CalendarDays size={22} aria-hidden="true" /> 日历</h1><p className="page__sub">{firstDay} 至 {endingDay}</p></div>
       <div className="page__actions">
         <IconButton label="上一周" disabled={busy} onClick={() => moveWeek(-7)}><ChevronLeft size={17} /></IconButton>
         <input aria-label="日历截止日期" type="date" value={endingDay} disabled={busy} onChange={(e) => {
@@ -160,33 +194,15 @@ export function CalendarPage() {
         <IconButton label="下一周" disabled={busy} onClick={() => moveWeek(7)}><ChevronRight size={17} /></IconButton>
         <IconButton label="刷新日历" onClick={refresh}><RefreshCw size={16} /></IconButton>
         <Button icon={<Upload size={15} />} disabled={busy} onClick={() => fileInput.current?.click()}>导入日历</Button>
-        <Button icon={<Plus size={15} />} disabled={busy} onClick={() => setCreating(true)}>新建事件</Button>
+        <Button icon={<Plus size={15} />} disabled={busy} onClick={() => setCreating({ linkTo: null })}>新建事件</Button>
         <input ref={fileInput} type="file" accept=".ics,text/calendar" hidden aria-label="日历文件" onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = '';
-          if (!file) return;
-          if (file.size > 2 * 1024 * 1024) { toast.push('日历文件不能超过 2 MB', 'error'); return; }
-          setBusy(true);
-          void file.text().then((content) => {
-            const body = { filename: file.name, content };
-            if (new TextEncoder().encode(JSON.stringify(body)).length > 2000000) {
-              throw new Error('日历内容超出上传限制，请拆分后导入');
-            }
-            return api.post<{ imported: number; events: CalendarEvent[] }>('/api/calendar/import', body);
-          })
-            .then((result) => {
-              toast.push(`已导入 ${result.imported} 个日历事件`, 'success');
-              const first = result.events[0];
-              if (first) {
-                const day = first.allDay ? first.startTime.slice(0, 10) : localDay(new Date(first.startTime));
-                setEndingDay(day); choose({ kind: 'event', id: first.id, day }, first);
-              }
-              refresh();
-            }).catch((cause: unknown) => toast.push(errorText(cause), 'error')).finally(() => setBusy(false));
+          if (file) importFile(file);
         }} />
       </div>
     </header>
-    {events.error ? <ErrorState message={events.error} onRetry={events.reload} /> : null}
+    {events.error ? <ErrorState error={events.error} onRetry={events.reload} /> : null}
     <div className="calendar-layout">
       <aside className="calendar-timeline" aria-label="日历时间轴">
         {events.loading && !events.data ? <Loading /> : days.map((day) => {
@@ -194,14 +210,14 @@ export function CalendarPage() {
           return <details key={day} open={day === selection.day || undefined}>
             <summary><span>{day === today ? '今天' : day.slice(5)} <span className="muted">{new Date(`${day}T12:00:00`).toLocaleDateString('zh-CN', { weekday: 'short' })}</span></span><span>{dayEvents.length}</span></summary>
             <button className={`calendar-event${selection.kind === 'day' && selection.day === day ? ' is-selected' : ''}`} disabled={busy} onClick={() => choose({ kind: 'day', day })}>
-              <strong>当日录音 / 未关联事件</strong>
+              <strong>当天全部录音</strong>
             </button>
             {dayEvents.map((event) => <button key={event.id} disabled={busy}
               className={`calendar-event${selectedEvent?.id === event.id ? ' is-selected' : ''}`}
               onClick={() => choose({ kind: 'event', day, id: event.id }, event)}>
               <span className="calendar-event-time">{eventTime(event)}</span>
               <strong>{event.summary}</strong>
-              <span className="calendar-event-meta"><span>{event.recordingCount} 段录音</span><span className={event.digest ? 'calendar-done' : 'muted'}>{event.digest ? '已整理' : '未整理'}</span></span>
+              <span className="calendar-event-meta"><span>{event.recordingCount} 段录音</span><span className={event.digest ? 'calendar-done' : 'muted'}>{event.digest ? '已有纪要' : '未生成纪要'}</span></span>
             </button>)}
           </details>;
         })}
@@ -220,44 +236,37 @@ export function CalendarPage() {
           {busy ? '正在处理' : selection.day === today ? '生成今日总结' : '生成当日总结'}
         </Button>}
         <h3 className="calendar-list-title">录音 <span className="muted">{recordings.loading ? '' : recordings.data?.length ?? 0}</span></h3>
-        {recordings.loading ? <Loading /> : recordings.error ? <ErrorState message={recordings.error} onRetry={recordings.reload} /> : !recordings.data?.length ? <Empty title="暂无录音" /> :
+        {recordings.loading ? <Loading /> : recordings.error ? <ErrorState error={recordings.error} onRetry={recordings.reload} /> : !recordings.data?.length ? <Empty title="这一天没有录音" /> :
           recordings.data.map((recording) => <div className="calendar-recording" key={recording.id}>
-            <button className={`calendar-recording-button${panel.kind === 'recording' && panel.id === recording.id ? ' is-selected' : ''}`}
-              onClick={() => { setPanel({ kind: 'recording', id: recording.id }); setGenerationError(''); }}>
-              <FileAudio size={16} /><span><strong>{recording.title}</strong>
-                <small>{recording.recordedAt ? new Date(recording.recordedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '录音时间未知'} · {formatDuration(recording.durationSec)}</small>
-                <small>{recording.calendarEventId ? '已关联事件' : '未关联事件'}</small></span>
-            </button>
-            <RecordingLinkSlot recording={recording} events={events.data ?? []} onChanged={() => { setPanel({ kind: 'empty' }); refresh(); }} />
-            {!recording.calendarEventId ? <CalendarAssociation id={recording.id} eventId={null} onChanged={() => { setPanel({ kind: 'empty' }); refresh(); }} /> : null}
+            <a className="calendar-recording-button" href={`#/rec/${recording.id}`}>
+              <FileAudio size={16} aria-hidden="true" /><span><strong>{recording.title}</strong>
+                <small>{recording.recordedAt ? new Date(recording.recordedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '录音时间未知'} · {formatDuration(recording.durationSec)}</small></span>
+            </a>
+            <EventLinker
+              recording={recording}
+              events={events.data ?? []}
+              expanded={expanded === recording.id}
+              highlighted={focusRec === recording.id}
+              onToggle={() => setExpanded((current) => (current === recording.id ? null : recording.id))}
+              onCreateEvent={(linkTo) => setCreating({ linkTo })}
+              onChanged={refresh}
+            />
           </div>)}
       </section>
-      <aside className="calendar-results" aria-label="转录与纪要">
-        {busy ? <Loading label="正在处理，请稍候" /> : generationError ? <div className="alert" role="alert"><h2>纪要未生成</h2><p>{generationError}</p></div> :
-          panel.kind === 'recording' ? <CalendarRecordingDetail key={panel.id} id={panel.id} /> :
+      <aside className="calendar-results" aria-label="纪要">
+        {busy ? <Loading label="正在处理，请稍候" /> : generationError ? <div className="calendar-results__error"><h2>纪要没有生成</h2><ErrorNotice error={generationError} /></div> :
           panel.kind === 'digest' ? <DigestDocument title={panel.title} text={panel.text} /> :
-          <Empty title="转录与纪要" />}
+          <Empty title="纪要" description="选中一个日程或一天，点「生成事件纪要」或「生成当日总结」后在这里查看。" />}
       </aside>
     </div>
-    {creating ? <CreateEvent day={selection.day} onClose={() => setCreating(false)} onCreated={(event) => {
-      setCreating(false); refresh(); const day = localDay(new Date(event.startTime)); setEndingDay(day); choose({ kind: 'event', id: event.id, day }, event);
+    {creating ? <CreateEvent day={selection.day} onClose={() => setCreating(null)} onCreated={(event) => {
+      const linkTo = creating.linkTo;
+      setCreating(null);
+      if (linkTo) {
+        void linkTo(event.id);
+        return;
+      }
+      refresh(); const day = localDay(new Date(event.startTime)); setEndingDay(day); choose({ kind: 'event', id: event.id, day }, event);
     }} /> : null}
   </div>;
-}
-
-function RecordingLinkSlot({ recording, events, onChanged }: { recording: CalendarRecording; events: CalendarEvent[]; onChanged: () => void }) {
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-  return <label className="calendar-link"><span>关联事件</span><select aria-label={`关联事件：${recording.title}`} disabled={busy} value={recording.calendarEventId ?? ''}
-    onChange={(e) => {
-      setBusy(true);
-      void api.put(`/api/recordings/${recording.id}`, { calendar_event_id: e.target.value ? Number(e.target.value) : null })
-        .then(() => { toast.push('录音关联已更新', 'success'); onChanged(); })
-        .catch((cause: unknown) => toast.push(errorText(cause), 'error')).finally(() => setBusy(false));
-    }}>
-    <option value="">未关联事件</option>
-    {recording.calendarEventId && !events.some((event) => event.id === recording.calendarEventId)
-      ? <option value={recording.calendarEventId}>已关联事件 #{recording.calendarEventId}</option> : null}
-    {events.map((event) => <option key={event.id} value={event.id}>{event.summary} · {event.startTime.slice(0, 10)}</option>)}
-  </select></label>;
 }

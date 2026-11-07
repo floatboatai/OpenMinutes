@@ -1,5 +1,9 @@
 // ABOUTME: 页面与服务端共用的录音业务契约；页面只依赖本文件的类型。
 
+import type { AppErrorView } from './errors';
+
+export type { ParsedDeviceFile } from './device';
+
 export type RecordingStatus =
   | 'pending'
   | 'ready'
@@ -106,6 +110,9 @@ export interface RecordingDetail {
   analysis: AnalysisRecord | null;
   jobs: JobRun[];
   lastError: string | null;
+  /** 失败原因分层：code 供页面判断，detail 只在「查看详情」里显示。 */
+  lastErrorCode: string | null;
+  lastErrorDetail: string | null;
   storagePath: string | null;
 }
 
@@ -128,18 +135,7 @@ export interface LiveState {
   partial: string;
   deviceName: string | null;
   lastSaved: { recordingId: number; filePath: string; chars: number } | null;
-}
-
-export interface DeviceHero {
-  serial: string;
-  model: string;
-  firmware: string | null;
-  batteryPct: number | null;
-  freeSpacePct: number | null;
-  lastSeenAt: string | null;
-  connected: boolean;
-  pendingPulls: number;
-  readyToTranscribe: number;
+  error: AppErrorView | null;
 }
 
 export interface Overview {
@@ -154,7 +150,6 @@ export interface Overview {
   byCategory: Array<{ id: number; name: string; color: string; count: number; durationSec: number }>;
   byStatus: Array<{ status: RecordingStatus; count: number }>;
   recent: RecordingSummary[];
-  device: DeviceHero | null;
 }
 
 export interface SettingEntry {
@@ -186,59 +181,6 @@ export interface SdkCommand {
   caution: boolean;
 }
 
-export interface CapabilityState {
-  domain: string;
-  ok: boolean;
-  detail: string;
-}
-
-export interface DeviceState {
-  env: DeviceEnv;
-  commands: SdkCommand[];
-  capabilities: CapabilityState[];
-  devices: Array<{
-    id: number;
-    serial: string;
-    model: string;
-    firmware: string | null;
-    batteryPct: number | null;
-    freeSpacePct: number | null;
-    lastSeenAt: string | null;
-  }>;
-  settings: SettingEntry[];
-}
-
-export interface DeviceStatus {
-  serial: string | null;
-  mac: string | null;
-  firmware: string | null;
-  batteryPct: number | null;
-  freeSpacePct: number | null;
-  storageFormat: string | null;
-  recordingState: string | null;
-  hotspotSsid: string | null;
-}
-
-export interface BridgeRunResult {
-  ok: boolean;
-  action: string;
-  command: string;
-  exitCode: number | null;
-  stdout: string;
-  stderr: string;
-  parsedFiles: ParsedDeviceFile[];
-  parsedStatus: DeviceStatus | null;
-  message: string;
-}
-
-export interface ParsedDeviceFile {
-  name: string;
-  format: string;
-  sizeBytes: number | null;
-  durationSec: number | null;
-  timestamp: number | null;
-}
-
 export interface ImportDirectoryState {
   /** 实际生效的目录：未配置时是默认收件目录 */
   directory: string;
@@ -251,7 +193,7 @@ export interface ImportDirectoryState {
   resetFrom: string | null;
   /** 目录里前几个音频文件名，供空态提示展示 */
   sample: string[];
-  /** 本次调用是否新建了目录（仅 directory/ensure 返回） */
+  /** 本次调用是否新建了目录 */
   created?: boolean;
 }
 
@@ -260,7 +202,7 @@ export interface IngestScanResult {
   skipped: number;
   failed: number;
   ids: number[];
-  files: Array<{ filename: string; outcome: 'imported' | 'skipped' | 'failed'; reason?: string }>;
+  files: Array<{ filename: string; outcome: 'imported' | 'skipped' | 'failed'; reason?: string; detail?: string }>;
   /** 实际扫描的目录 */
   directory: string;
   /** 扫描前目录不存在，已自动创建 */

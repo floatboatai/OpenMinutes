@@ -40,7 +40,7 @@ const upload = `(() => {
   return input.accept;
 })()`;
 browse('calendar-import', [
-  { goto: '#/calendar' }, { waitText: '日历视图' },
+  { goto: '#/calendar' }, { waitText: '导入日历' },
   { screenshot: '01-before-import.png' }, { eval: upload },
   { waitText: '已导入 4 个日历事件' },
   { waitText: '产品项目评审' }, { screenshot: '02-calendar-main.png' },
@@ -53,11 +53,11 @@ assert.ok(event);
 command('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6',
   '-ar', '16000', '-ac', '1', '-b:a', '32k', join(run.dirs.inbox, 'REC20261029_101500.mp3')]);
 browse('calendar-audio-import', [
-  { goto: '#/library' }, { click: 'text=导入新录音' },
+  { goto: '#/library' }, { waitFor: 'aria=搜索录音' }, { click: 'text=导入' },
   { waitText: '1 个音频文件' }, { screenshot: 'before-scan.png' },
-  { click: 'text=立即扫描' },
-  { waitText: '导入 1 个文件，跳过 0 个，失败 0 个', timeout: 15000 },
-  { screenshot: 'after-scan.png' },
+  { click: 'text=扫描并导入' },
+  { waitText: '已导入 1 条', timeout: 15000 },
+  { screenshot: 'after-scan.png' }, { click: 'text=关闭' },
 ]);
 const library = await readback('/api/recordings', 'recordings-imported.json');
 assert.equal(library.total, 1);
@@ -68,25 +68,31 @@ assert.ok(readdirSync(join(run.dirs.library, '2026-10')).some((name) => name.end
 const suggestions = await readback(`/api/recordings/${recording.id}/calendar-suggestions`, 'suggestions.json');
 assert.equal(suggestions[0].event.id, event.id);
 browse('calendar-suggestions', [
-  { goto: `#/rec/${recording.id}` }, { waitText: `建议关联到：${event.summary}` },
+  // 详情页只读：关联只能在日历页的 EventLinker 里做。
+  { goto: `#/rec/${recording.id}` }, { waitText: '在日历中关联' },
+  { click: 'text=在日历中关联' }, { waitText: `关联到：${event.summary}` },
+  { eval: `(() => { if (!location.hash.includes('rec=${recording.id}') || !location.hash.includes('day=2026-10-29')) throw Error('calendar context missing: ' + location.hash); const rows = document.querySelectorAll('.calendar-recording').length; const linkers = document.querySelectorAll('.calendar-recording .eventlinker').length; const stray = [...document.querySelectorAll('.calendar-recording select')].filter((el) => !el.closest('.eventlinker')).length; if (!rows || rows !== linkers || stray) throw Error('expected exactly one link control per recording'); return { rows, linkers }; })()` },
   { screenshot: '03-recording-suggestion.png' }, { aria: 'recording-suggestion.aria.txt' },
-  { click: `text=建议关联到：${event.summary}` }, { waitText: '录音关联已更新' },
+  { click: `text=关联到：${event.summary}` }, { waitText: '已关联日程' },
   { waitText: '解除关联' }, { screenshot: '04-suggested-link.png' },
   { click: 'text=解除关联' }, { waitText: '已解除关联' },
 ]);
 assert.equal((await readback(`/api/recordings/${recording.id}`, 'unlinked-recording.json')).recording.calendarEventId, null);
 browse('calendar-manual-link', [
-  { goto: '#/calendar' },
-  { fill: 'aria=日历截止日期', value: '2026-10-29' },
+  { goto: '#/calendar?day=2026-10-29' },
   { waitText: recording.filename },
   { screenshot: '05-before-link.png' },
-  { select: `aria=关联事件：${recording.filename}`, value: String(event.id) },
-  { waitText: '录音关联已更新' }, { waitText: '已关联事件' },
+  { click: '.eventlinker__toggle' },
+  { select: `aria=选择其他事件：${recording.filename}`, value: String(event.id) },
+  { waitText: '已关联日程' }, { waitText: `已关联：${event.summary}` },
+  // 从日历进入详情：详情页只读显示日程，返回后回到日历的同一天。
+  { click: '.calendar-recording-button' }, { waitText: '返回日历' }, { waitText: event.summary },
+  { expectText: '在日历中修改' }, { screenshot: '07-recording-detail.png' },
+  { click: 'text=返回日历' }, { waitText: recording.filename },
+  { eval: `(() => { if (!location.hash.startsWith('#/calendar') || !location.hash.includes('day=2026-10-29')) throw Error('did not return to calendar day: ' + location.hash); return location.hash; })()` },
   { click: 'details[open] .calendar-event:nth-of-type(2)' }, { waitText: '生成事件纪要' },
   { waitText: recording.filename }, { screenshot: '06-event-associated.png' },
-  { click: '.calendar-recording-button' }, { waitText: '尚无转录文本' },
-  { screenshot: '07-recording-detail.png' },
-  { click: 'text=生成事件纪要' }, { waitText: 'LLM 不可用' },
+  { click: 'text=生成事件纪要' }, { waitText: 'AI 整理暂不可用' },
   { screenshot: '08-digest-result.png' }, { aria: 'digest-result.aria.txt' },
 ]);
 assert.equal((await readback(`/api/recordings/${recording.id}`, 'linked-recording.json')).recording.calendarEventId, event.id);

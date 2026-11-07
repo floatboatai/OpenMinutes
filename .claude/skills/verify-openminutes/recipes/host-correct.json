@@ -1,6 +1,6 @@
 [
   {"goto":"#/rec/1"},
-  {"waitText":"返回录音库"},
+  {"waitText":"返回录音"},
   {"screenshot":"01-before.png"},
   {"click":"aria=编辑标题"},
   {"fill":"aria=录音标题","value":"人工确认的发布计划"},

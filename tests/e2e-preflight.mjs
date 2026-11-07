@@ -101,7 +101,7 @@ for (const simulated of [false, true]) {
     }
     assert.ok(url, log);
     await writeFile(path.join(runDir, 'run.json'), JSON.stringify({
-      runId, url, pid: child.pid, nonce, root, runDir, evidenceDir, dirs, startedAt: new Date().toISOString(),
+      runId, url, pid: child.pid, nonce, root, runDir, evidenceDir, dirs, hostMode: simulated ? 'fixture' : 'none', startedAt: new Date().toISOString(),
     }));
     registered = true;
     await script('doctor.mjs', [runId]);
@@ -111,8 +111,8 @@ for (const simulated of [false, true]) {
     assert.equal(requests.filter((call) => call.domain === 'agent').length, 0);
     const checkedAt = initial.data.report.checkedAt;
     const steps = [
-      { goto: '#/device' }, { waitText: '本机环境', timeout: 60000 },
-      { waitText: simulated ? 'Host agent' : 'agent 不可用', timeout: 60000 },
+      { goto: '#/settings/diagnostics' }, { waitText: '本机环境', timeout: 60000 },
+      { waitText: simulated ? 'Floatboat 助手' : 'Floatboat 助手暂不可用', timeout: 60000 },
       { aria: 'before.aria.txt' }, { screenshot: 'before.png' },
       { click: 'text=重新检测' }, { waitText: '环境检测已刷新', timeout: 60000 },
       ...(simulated ? [
@@ -120,12 +120,12 @@ for (const simulated of [false, true]) {
         { waitText: '修复中', timeout: 60000 },
         { waitText: '模拟 Host：未执行安装或修改。', timeout: 60000 },
         { expectText: '模拟 Host：未执行安装或修改。' },
-      ] : [{ expectText: 'agent 不可用' }]),
+      ] : [{ expectText: 'Floatboat 助手暂不可用' }]),
       { aria: 'after.aria.txt' }, { screenshot: 'after.png' },
     ];
     const stepsPath = path.join(runDir, 'steps.json');
     await writeFile(stepsPath, JSON.stringify(steps));
-    await script('browse.mjs', [runId, 'device', `@${stepsPath}`]);
+    await script('browse.mjs', [runId, 'diagnostics', `@${stepsPath}`]);
     await checkMobile({ runDir, evidenceDir, url });
     const after = await fetch(`${url}/api/environment`).then((response) => response.json());
     assert.notEqual(after.data.report.checkedAt, checkedAt);
@@ -157,11 +157,11 @@ for (const simulated of [false, true]) {
       }
       assert.ok(url, log);
       await writeFile(path.join(runDir, 'run.json'), JSON.stringify({
-        runId, url, pid: child.pid, nonce, root, runDir, evidenceDir, dirs, startedAt: new Date().toISOString(),
+        runId, url, pid: child.pid, nonce, root, runDir, evidenceDir, dirs, hostMode: simulated ? 'fixture' : 'none', startedAt: new Date().toISOString(),
       }));
       await script('doctor.mjs', [runId]);
       await writeFile(stepsPath, JSON.stringify([
-        { goto: '#/device' }, { waitText: '修复结果未知，已禁止重复提交', timeout: 60000 },
+        { goto: '#/settings/diagnostics' }, { waitText: '修复结果未知，已禁止重复提交', timeout: 60000 },
         { eval: "(() => { const b = [...document.querySelectorAll('button')].find(b => b.textContent.includes('让 Floatboat 助手修复')); if (!b?.disabled) throw new Error('repair must be disabled'); return true; })()" },
         { aria: 'unknown.aria.txt' }, { screenshot: 'unknown.png' },
       ]));
@@ -171,13 +171,13 @@ for (const simulated of [false, true]) {
       assert.equal(blocked.data.idempotencyKey, starts[0].input.idempotencyKey);
       recoveryMode = 'running';
       await writeFile(stepsPath, JSON.stringify([
-        { goto: '#/device' }, { waitText: '修复中', timeout: 60000 },
+        { goto: '#/settings/diagnostics' }, { waitText: '修复中', timeout: 60000 },
         { aria: 'running.aria.txt' }, { screenshot: 'running.png' },
       ]));
       await script('browse.mjs', [runId, 'restart-running', `@${stepsPath}`]);
       recoveryMode = 'completed';
       await writeFile(stepsPath, JSON.stringify([
-        { goto: '#/device' }, { waitText: '已重新检测', timeout: 60000 },
+        { goto: '#/settings/diagnostics' }, { waitText: '已重新检测', timeout: 60000 },
         { aria: 'completed.aria.txt' }, { screenshot: 'completed.png' },
       ]));
       await script('browse.mjs', [runId, 'restart-completed', `@${stepsPath}`]);
@@ -189,10 +189,11 @@ for (const simulated of [false, true]) {
     } else {
       const denied = await fetch(`${url}/api/environment/repair`, { method: 'POST' }).then((response) => response.json());
       assert.equal(denied.ok, false);
-      assert.match(denied.error, /agent 不可用/);
+      assert.match(denied.error, /Floatboat 助手暂不可用/);
+      assert.match(denied.detail ?? '', /agent 不可用/);
       await writeFile(path.join(evidenceDir, 'repair-denied.json'), JSON.stringify(denied, null, 2));
     }
-    assert.equal((await readFile(path.join(evidenceDir, 'device', 'console.log'), 'utf8')).trim(), '');
+    assert.equal((await readFile(path.join(evidenceDir, 'diagnostics', 'console.log'), 'utf8')).trim(), '');
     await writeFile(path.join(evidenceDir, 'environment.json'), JSON.stringify(after, null, 2));
     await writeFile(path.join(evidenceDir, 'host-fixture-requests.json'), JSON.stringify(requests, null, 2));
     await writeFile(path.join(evidenceDir, 'server.log'), log);

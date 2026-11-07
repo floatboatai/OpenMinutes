@@ -32,7 +32,7 @@ def main():
     try:
         from memotalk import MemoTalkClient
     except Exception as error:  # noqa: BLE001
-        log("error", stage="import", message="%s: %s" % (type(error).__name__, error))
+        log("error", stage="import", kind=type(error).__name__, message=str(error))
         return 3
 
     loop_holder = {}
@@ -110,7 +110,7 @@ def main():
                 log("stopped", audio_bytes=total)
             return 0
         except Exception as error:  # noqa: BLE001
-            log("error", stage="stream", message="%s: %s" % (type(error).__name__, error))
+            log("error", stage="stream", kind=type(error).__name__, message=str(error))
             return 4
 
     try:

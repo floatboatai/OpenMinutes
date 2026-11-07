@@ -1,3 +1,5 @@
+// ABOUTME: 本机环境自检：系统、录音笔组件、音频处理、语音识别与 AI 整理、存储目录；技术原文进 detail。
+
 import { mkdtemp, mkdir, writeFile, unlink, rmdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -5,29 +7,34 @@ import { randomUUID } from 'node:crypto';
 import type { WorkbenchServer } from '../../sdk/runtime.mjs';
 import type { HostClient } from '../../sdk/host-contracts.mjs';
 import type { DeviceEnv } from '../contracts/app';
+import type { HostCapabilities, HostCapability } from '../contracts/device';
 import type { PreflightItem, PreflightReport } from '../contracts/preflight';
-import { probeEnvironment, pythonRuntimeEnv } from './bridge';
+import { probeEnvironment, pythonRuntimeEnv } from './runtime-probe';
 import { libraryRoot } from './library';
 import { resolveImportDir } from './ingest';
 import { runCommand, verifyDecodable } from './media';
 
 export function systemCheck(platform: string, arch: string): PreflightItem {
   const supported = ['win32', 'darwin', 'linux'].includes(platform) && ['x64', 'arm64'].includes(arch);
-  return { id: 'system', label: '系统与架构', status: supported ? 'ok' : 'fail',
-    reason: `${platform} / ${arch}`, autoRepair: false, action: supported ? '' : '请使用支持的 Windows、macOS 或 Linux x64/arm64 环境。' };
+  return { id: 'system', label: '系统与架构', group: 'device', status: supported ? 'ok' : 'fail',
+    reason: supported ? '系统受支持' : '当前系统不受支持', detail: `${platform} / ${arch}`, autoRepair: false,
+    action: supported ? '' : '请使用支持的 Windows、macOS 或 Linux x64/arm64 环境。' };
 }
+
+const RUNTIME_ACTION = '在本应用目录执行 uv venv --python 3.12 .venv，再执行 uv pip install --python .venv bleak memotalk-sdk（已有 .venv 不要覆盖）。用 uv run --no-project --python .venv python -c "import bleak, memotalk" 验证，再重新检测；自定义解释器需在设置中切换。';
 
 export function dependencyChecks(env: DeviceEnv): PreflightItem[] {
   return ([
-    ['python', 'Python >=3.10', env.python],
-    ['bleak', 'bleak', env.bleak],
-    ['sdk', 'memotalk-sdk', env.sdk],
-    ['ffmpeg', 'ffmpeg', env.ffmpeg],
-  ] as const).map(([id, label, probe]) => ({
-    id, label, status: probe.ok ? 'ok' : 'fail', reason: probe.detail, autoRepair: !probe.ok,
+    ['python', 'Python 运行环境', 'device', env.python, '已就绪', '没有找到可用的 Python'],
+    ['bleak', '蓝牙组件', 'device', env.bleak, '已就绪', '蓝牙组件不可用'],
+    ['sdk', '录音笔组件', 'device', env.sdk, '已就绪', '录音笔组件不可用'],
+    ['ffmpeg', '音频处理工具', 'audio', env.ffmpeg, '已就绪', '没有找到音频处理工具'],
+  ] as const).map(([id, label, group, probe, okText, failText]) => ({
+    id, label, group, status: probe.ok ? 'ok' : 'fail', reason: probe.ok ? okText : failText, detail: probe.detail,
+    autoRepair: !probe.ok,
     action: probe.ok ? '' : id === 'ffmpeg'
       ? '安装用户级 ffmpeg，或在设置中填写已安装的 ffmpeg 绝对路径；系统级安装需先确认。'
-      : '在本应用目录执行 uv venv --python 3.12 .venv，再执行 uv pip install --python .venv bleak memotalk-sdk（已有 .venv 不要覆盖）。用 uv run --no-project --python .venv python -c "import bleak, memotalk" 验证，再重新检测；自定义解释器需在设置中切换。',
+      : RUNTIME_ACTION,
   }));
 }
 
@@ -37,13 +44,17 @@ const requiredOperations: Record<string, string[]> = {
   agent: ['start', 'get'],
 };
 
+const capabilityLabels: Record<string, string> = { asr: '语音识别', llm: 'AI 整理', agent: 'Floatboat 助手' };
+
 export function capabilityCheck(domain: string, entries: Array<{ operation: string; declared: boolean; status: string }>): PreflightItem {
   const available = new Set(entries.filter((entry) => entry.declared && entry.status === 'available')
     .map((entry) => entry.operation.startsWith(`${domain}.`) ? entry.operation.slice(domain.length + 1) : entry.operation));
   const missing = (requiredOperations[domain] ?? []).filter((operation) => !available.has(operation));
+  const label = capabilityLabels[domain] ?? domain;
   return {
-    id: `host-${domain}`, label: `Host ${domain}`, status: missing.length ? 'warn' : 'ok', autoRepair: false,
-    reason: missing.length ? `${domain} 不可用：${missing.join(', ')}` : '能力已声明且可用；调用授权由 Host 检查',
+    id: `host-${domain}`, label, group: 'ai', status: missing.length ? 'warn' : 'ok', autoRepair: false,
+    reason: missing.length ? `${label}暂不可用` : '可用',
+    detail: missing.length ? `${domain} 不可用：${missing.join(', ')}` : '能力已声明且可用；调用授权由 Host 检查',
     action: missing.length ? '在 Floatboat 中打开应用，授权对应能力并检查模型账户配置。' : '',
   };
 }
@@ -53,9 +64,24 @@ export async function hostChecks(host: Pick<HostClient, 'capabilities'>): Promis
     try {
       return capabilityCheck(domain, (await host.capabilities.list({ domain })).capabilities);
     } catch (error) {
-      return { ...capabilityCheck(domain, []), reason: `${domain} 不可用：${error instanceof Error ? error.message : String(error)}` };
+      return { ...capabilityCheck(domain, []), detail: `${domain} 不可用：${error instanceof Error ? error.message : String(error)}` };
     }
   }));
+}
+
+/** 宿主能力清单的唯一来源：诊断页与验证脚本都读它。 */
+export async function listHostCapabilities(host: Pick<HostClient, 'capabilities'>): Promise<HostCapabilities> {
+  const pick = async (domain: string): Promise<HostCapability[]> => {
+    try {
+      const result = await host.capabilities.list({ domain });
+      return result.capabilities
+        .filter((item) => item.declared || item.status !== 'not-declared')
+        .map((item) => ({ operation: item.operation, status: item.status, declared: item.declared }));
+    } catch (error) {
+      return [{ operation: 'error', status: error instanceof Error ? error.message : String(error), declared: false }];
+    }
+  };
+  return { asr: await pick('asr'), llm: await pick('llm') };
 }
 
 export async function writableDirectory(id: string, label: string, directory: string): Promise<PreflightItem> {
@@ -64,25 +90,26 @@ export async function writableDirectory(id: string, label: string, directory: st
     await mkdir(directory, { recursive: true });
     await writeFile(target, '', { flag: 'wx' });
     await unlink(target);
-    return { id, label, status: 'ok', reason: directory, autoRepair: false, action: '' };
+    return { id, label, group: 'storage', status: 'ok', reason: '可写', detail: directory, autoRepair: false, action: '' };
   } catch (error) {
-    return { id, label, status: 'fail', reason: `${directory}: ${error instanceof Error ? error.message : String(error)}`,
+    return { id, label, group: 'storage', status: 'fail', reason: '没有写入权限',
+      detail: `${directory}: ${error instanceof Error ? error.message : String(error)}`,
       autoRepair: true, action: '在应用设置中选择当前用户可写目录；不得删除录音、修改系统权限或移动已有数据。' };
   }
 }
 
-export function bluetoothPermission(value: string): Pick<PreflightItem, 'status' | 'reason'> {
-  if (value === '3') return { status: 'ok', reason: 'CoreBluetooth 已授权；设备发现仍需实际连接验证（标识为 UUID）。' };
-  if (value === '0') return { status: 'warn', reason: '蓝牙权限尚未请求。首次连接时需在 macOS 授权；本次未扫描设备。' };
-  if (value === '1' || value === '2') return { status: 'fail', reason: 'macOS 蓝牙权限被限制或拒绝。' };
-  return { status: 'warn', reason: '无法确认蓝牙授权，需在 macOS 真机首次连接时验证。' };
+export function bluetoothPermission(value: string): Pick<PreflightItem, 'status' | 'reason' | 'detail'> {
+  if (value === '3') return { status: 'ok', reason: '蓝牙已授权', detail: 'CoreBluetooth 已授权；设备发现仍需实际连接验证（标识为 UUID）。' };
+  if (value === '0') return { status: 'warn', reason: '首次连接时需要授权蓝牙', detail: '蓝牙权限尚未请求。首次连接时需在 macOS 授权；本次未扫描设备。' };
+  if (value === '1' || value === '2') return { status: 'fail', reason: '蓝牙权限被拒绝', detail: 'macOS 蓝牙权限被限制或拒绝。' };
+  return { status: 'warn', reason: '无法确认蓝牙授权', detail: '无法确认蓝牙授权，需在 macOS 真机首次连接时验证。' };
 }
 
 export async function bluetoothCheck(platform: NodeJS.Platform, env: DeviceEnv): Promise<PreflightItem> {
-  const item: PreflightItem = { id: 'bluetooth', label: '蓝牙', status: 'warn',
-    reason: '未连接设备；蓝牙可用性尚未确认。', autoRepair: false,
+  const item: PreflightItem = { id: 'bluetooth', label: '蓝牙', group: 'device', status: 'warn',
+    reason: '蓝牙可用性尚未确认', detail: '未连接设备；蓝牙可用性尚未确认。', autoRepair: false,
     action: '启用蓝牙；macOS 在系统设置 > 隐私与安全性 > 蓝牙中授权实际发起请求的应用。不得通过修改 TCC 数据库绕过授权。' };
-  if (!env.bleak.ok || !env.python.resolvedPath) return { ...item, reason: '请先修复 Python/bleak，再检查蓝牙。' };
+  if (!env.bleak.ok || !env.python.resolvedPath) return { ...item, reason: '请先修复蓝牙组件', detail: '请先修复 Python/bleak，再检查蓝牙。' };
   if (platform === 'darwin') {
     const result = await runCommand(env.python.resolvedPath,
       ['-c', 'from CoreBluetooth import CBManager;print(CBManager.authorization())'], 8000,
@@ -91,25 +118,28 @@ export async function bluetoothCheck(platform: NodeJS.Platform, env: DeviceEnv):
     if (permission.status !== 'ok') return { ...item, ...permission };
     const hardware = await runCommand('/usr/sbin/system_profiler', ['SPBluetoothDataType', '-json'], 12000);
     const powered = hardware.ok && /"controller_state"\s*:\s*"attrib_on"/.test(hardware.stdout);
-    return { ...item, status: powered ? 'ok' : 'warn', reason: `${permission.reason} ${powered ? '控制器已开启。' : '控制器状态未确认，请检查蓝牙开关。'}` };
+    return { ...item, status: powered ? 'ok' : 'warn', reason: powered ? '蓝牙已开启' : '请检查蓝牙开关',
+      detail: `${permission.detail} ${powered ? '控制器已开启。' : '控制器状态未确认，请检查蓝牙开关。'}` };
   }
   if (platform === 'win32') {
     const result = await runCommand('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
       '@(Get-PnpDevice -Class Bluetooth -PresentOnly -ErrorAction Stop | Where-Object Status -eq OK).Count'], 12000);
-    return { ...item, status: result.ok && Number(result.stdout.trim()) > 0 ? 'ok' : 'warn',
-      reason: result.ok && Number(result.stdout.trim()) > 0 ? '已发现正常的蓝牙设备；未扫描或连接录音笔。' : '未确认可用蓝牙适配器，请检查蓝牙开关和驱动。' };
+    const ok = result.ok && Number(result.stdout.trim()) > 0;
+    return { ...item, status: ok ? 'ok' : 'warn', reason: ok ? '蓝牙已就绪' : '请检查蓝牙开关和驱动',
+      detail: ok ? '已发现正常的蓝牙设备；未扫描或连接录音笔。' : `未确认可用蓝牙适配器。${result.stderr.trim().slice(-300)}` };
   }
   if (platform === 'linux') {
     const result = await runCommand('bluetoothctl', ['show'], 8000);
-    return { ...item, status: result.ok && /Powered:\s*yes/.test(result.stdout) ? 'ok' : 'warn',
-      reason: result.ok && /Powered:\s*yes/.test(result.stdout) ? 'BlueZ 控制器已开启；未扫描设备。' : '未确认 BlueZ 控制器，检查 bluetoothd、蓝牙开关和 D-Bus 权限。' };
+    const ok = result.ok && /Powered:\s*yes/.test(result.stdout);
+    return { ...item, status: ok ? 'ok' : 'warn', reason: ok ? '蓝牙已开启' : '请检查蓝牙开关',
+      detail: ok ? 'BlueZ 控制器已开启；未扫描设备。' : '未确认 BlueZ 控制器，检查 bluetoothd、蓝牙开关和 D-Bus 权限。' };
   }
   return item;
 }
 
 export async function decodeCheck(ffmpeg: string | null): Promise<PreflightItem> {
-  const base: PreflightItem = { id: 'decode', label: '音频解码', status: 'fail', reason: '缺少 ffmpeg', autoRepair: true,
-    action: '安装支持 WAV/PCM 和 MP3 解码的 ffmpeg，并在设置中填写路径。' };
+  const base: PreflightItem = { id: 'decode', label: '音频解码', group: 'audio', status: 'fail', reason: '还不能解码音频',
+    detail: '缺少 ffmpeg', autoRepair: true, action: '安装支持 WAV/PCM 和 MP3 解码的 ffmpeg，并在设置中填写路径。' };
   if (!ffmpeg) return base;
   let directory: string | null = null;
   try {
@@ -122,9 +152,10 @@ export async function decodeCheck(ffmpeg: string | null): Promise<PreflightItem>
     wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(3200, 40);
     await writeFile(file, wav);
     const result = await verifyDecodable(ffmpeg, file);
-    return { ...base, status: result.ok ? 'ok' : 'fail', reason: result.message, autoRepair: !result.ok, action: result.ok ? '' : base.action };
+    return { ...base, status: result.ok ? 'ok' : 'fail', reason: result.ok ? '可以解码' : base.reason, detail: result.message,
+      autoRepair: !result.ok, action: result.ok ? '' : base.action };
   } catch (error) {
-    return { ...base, reason: `无法完成解码检查：${String(error)}`, autoRepair: false,
+    return { ...base, reason: '无法完成解码检查', detail: String(error), autoRepair: false,
       action: '检查系统临时目录是否可写及磁盘剩余空间，然后重新检测。' };
   } finally {
     if (directory) {
@@ -142,9 +173,14 @@ export interface PreflightDependencies {
   decode: (ffmpeg: string | null) => Promise<PreflightItem>;
 }
 
+export interface PreflightSnapshot {
+  report: PreflightReport;
+  env: DeviceEnv;
+}
+
 export function createPreflight(platform: NodeJS.Platform, arch: string, dependencies: PreflightDependencies) {
-  let cached: { report: PreflightReport; env: DeviceEnv } | null = null;
-  let pending: Promise<{ report: PreflightReport; env: DeviceEnv }> | null = null;
+  let cached: PreflightSnapshot | null = null;
+  let pending: Promise<PreflightSnapshot> | null = null;
   async function inspect() {
     const env = await dependencies.environment();
     const [directories, host, bluetooth, decode] = await Promise.all([
@@ -162,6 +198,10 @@ export function createPreflight(platform: NodeJS.Platform, arch: string, depende
       pending = inspect().finally(() => { pending = null; });
       return pending;
     },
+    /** 只读缓存，不触发探测；轮询接口用它。 */
+    peek(): PreflightSnapshot | null {
+      return cached;
+    },
   };
 }
 
@@ -170,7 +210,7 @@ export function appPreflight(app: WorkbenchServer) {
     environment: () => probeEnvironment(app.database),
     directories: () => Promise.all([
       writableDirectory('import-dir', '导入目录', resolveImportDir(app.database).directory),
-      writableDirectory('library-dir', '归档目录', libraryRoot(app.database)),
+      writableDirectory('library-dir', '录音库目录', libraryRoot(app.database)),
     ]),
     host: () => hostChecks(app.host),
     bluetooth: (env) => bluetoothCheck(process.platform, env),

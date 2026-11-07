@@ -1,8 +1,11 @@
 // ABOUTME: 通用界面原子组件与轻量提示系统。
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { CircleAlert, CircleCheck, Info, Loader2, RefreshCw, X } from 'lucide-react';
+import { CircleAlert, CircleCheck, Info, Loader2, X } from 'lucide-react';
 import type { RecordingStatus } from '../../contracts/app';
+import type { AppErrorView } from '../../contracts/errors';
+import { toErrorView } from '../api';
+import { ErrorNotice } from './ErrorNotice';
 
 // ------------------------------------------------------------------ 提示
 
@@ -11,26 +14,45 @@ interface ToastItem {
   id: number;
   message: string;
   tone: ToastTone;
+  error?: AppErrorView;
 }
 
 interface ToastApi {
   push: (message: string, tone?: ToastTone) => void;
+  /** 只显示中文结论；有技术详情时附「详情」按钮，且不会自动消失。 */
+  error: (error: unknown) => void;
 }
 
-const ToastContext = createContext<ToastApi>({ push: () => undefined });
+const ToastContext = createContext<ToastApi>({ push: () => undefined, error: () => undefined });
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
+  const [opened, setOpened] = useState<AppErrorView | null>(null);
   const counter = useRef(0);
 
-  const push = useCallback((message: string, tone: ToastTone = 'info') => {
-    counter.current += 1;
-    const id = counter.current;
-    setItems((current) => [...current, { id, message, tone }]);
-    window.setTimeout(() => setItems((current) => current.filter((item) => item.id !== id)), 5200);
+  const dismiss = useCallback((id: number) => setItems((current) => current.filter((item) => item.id !== id)), []);
+
+  // 详情弹窗挂在整个外壳上：换页后必须关掉，否则跳转看起来像没反应。
+  useEffect(() => {
+    const close = () => setOpened(null);
+    window.addEventListener('hashchange', close);
+    return () => window.removeEventListener('hashchange', close);
   }, []);
 
-  const value = useMemo<ToastApi>(() => ({ push }), [push]);
+  const add = useCallback((item: Omit<ToastItem, 'id'>, sticky: boolean) => {
+    counter.current += 1;
+    const id = counter.current;
+    setItems((current) => [...current, { ...item, id }]);
+    if (!sticky) window.setTimeout(() => dismiss(id), 5200);
+  }, [dismiss]);
+
+  const push = useCallback((message: string, tone: ToastTone = 'info') => add({ message, tone }, false), [add]);
+  const error = useCallback((cause: unknown) => {
+    const view = toErrorView(cause);
+    add({ message: view.message, tone: 'error', error: view }, Boolean(view.detail));
+  }, [add]);
+
+  const value = useMemo<ToastApi>(() => ({ push, error }), [push, error]);
 
   return (
     <ToastContext.Provider value={value}>
@@ -42,9 +64,29 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             {item.tone === 'error' ? <CircleAlert size={16} aria-hidden="true" /> : null}
             {item.tone === 'info' ? <Info size={16} aria-hidden="true" /> : null}
             <span>{item.message}</span>
+            {item.error?.detail ? (
+              <button type="button" className="toast__link" onClick={() => setOpened(item.error ?? null)}>
+                详情
+              </button>
+            ) : null}
+            {item.error?.detail ? (
+              <button type="button" className="toast__close" aria-label="关闭提示" onClick={() => dismiss(item.id)}>
+                <X size={13} aria-hidden="true" />
+              </button>
+            ) : null}
           </div>
         ))}
       </div>
+      {opened ? (
+        <Modal title="出错详情" onClose={() => setOpened(null)}>
+          {/* 链接指向当前页时不会触发 hashchange，点击时也要关闭弹窗。 */}
+          <div onClickCapture={(event) => {
+            if ((event.target as HTMLElement).closest('a[href^="#"]')) setOpened(null);
+          }}>
+            <ErrorNotice error={opened} defaultOpen />
+          </div>
+        </Modal>
+      ) : null}
     </ToastContext.Provider>
   );
 }
@@ -120,14 +162,14 @@ export function IconButton({ label, onClick, active, disabled, children }: IconB
 // ------------------------------------------------------------------ 状态
 
 const STATUS_META: Record<RecordingStatus, { label: string; tone: string }> = {
-  pending: { label: '待拉取', tone: 'neutral' },
+  pending: { label: '在录音笔中', tone: 'neutral' },
   ready: { label: '待转录', tone: 'info' },
   queued_transcribe: { label: '转录已排队', tone: 'busy' },
   queued_organize: { label: '归类已排队', tone: 'busy' },
   transcribing: { label: '转录中', tone: 'busy' },
   transcribed: { label: '待归类', tone: 'info' },
   analyzing: { label: '归类中', tone: 'busy' },
-  organized: { label: '已归档', tone: 'success' },
+  organized: { label: '已整理', tone: 'success' },
   failed: { label: '失败', tone: 'danger' },
 };
 
@@ -195,17 +237,10 @@ export function Empty({ title, description, action }: { title: string; descripti
   );
 }
 
-export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ErrorState({ error, onRetry }: { error: AppErrorView; onRetry?: () => void }) {
   return (
-    <div className="empty empty--error">
-      <CircleAlert size={22} aria-hidden="true" />
-      <p className="empty__title">加载失败</p>
-      <p className="empty__desc">{message}</p>
-      {onRetry ? (
-        <Button size="sm" icon={<RefreshCw size={14} aria-hidden="true" />} onClick={onRetry}>
-          重试
-        </Button>
-      ) : null}
+    <div className="errorstate">
+      <ErrorNotice error={error} onRetry={onRetry} />
     </div>
   );
 }

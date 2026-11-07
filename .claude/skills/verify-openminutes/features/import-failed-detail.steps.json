@@ -1,0 +1,16 @@
+[
+  {"goto":"#/library"},
+  {"click":"text=导入"},
+  {"waitText":"扫描并导入"},
+  {"waitText":"个音频文件"},
+  {"click":"text=扫描并导入"},
+  {"waitText":"1 条没有导入","timeout":20000},
+  {"eval":"(() => { const row = document.querySelector('.scandetail--failed'); if (!row) throw Error('no failed row'); const notice = row.querySelector('.errornotice'); if (!notice) throw Error('failed row must use the two-layer error notice'); if (row.querySelector('.errornotice__detail')) throw Error('technical detail must stay folded until 查看详情'); const toggle = [...row.querySelectorAll('button')].find((b) => b.innerText.trim() === '查看详情'); if (!toggle) throw Error('failed row must offer 查看详情'); return row.innerText; })()"},
+  {"screenshot":"01-failed-folded.png"},
+  {"aria":"01-failed-folded.aria.txt"},
+  {"click":".scandetail--failed .errornotice button[aria-expanded]"},
+  {"waitFor":".scandetail--failed .errornotice__detail"},
+  {"eval":"(() => { const detail = document.querySelector('.scandetail--failed .errornotice__detail')?.innerText ?? ''; if (!detail.includes('[IMPORT_FAILED]') || detail.split('\\n').length < 2) throw Error('expanded detail must carry the technical cause: ' + detail); const copy = [...document.querySelectorAll('.scandetail--failed button')].find((b) => b.innerText.includes('复制诊断信息')); if (!copy) throw Error('detail must be copyable'); return detail; })()"},
+  {"screenshot":"02-failed-expanded.png"},
+  {"aria":"02-failed-expanded.aria.txt"}
+]

@@ -34,12 +34,8 @@
 .calendar-link > span { color: var(--app-muted); }
 .calendar-results { background: var(--app-surface); }
 .calendar-markdown { font: inherit; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
-.calendar-transcript h3 { font-size: 14px; margin-top: 24px; margin-bottom: 8px; }
-.calendar-transcript ul { list-style: disc; padding-left: 20px; }
 .calendar-form { display: grid; gap: 14px; }
 .calendar-form input { width: 100%; }
-.calendar-suggestion { padding: 10px 0; font-size: 12px; }
-.calendar-suggestion button { text-align: left; white-space: normal; height: auto; }
 .calendar-page button:focus-visible, .calendar-page summary:focus-visible { outline: 2px solid var(--app-primary); outline-offset: 2px; }
 @media (max-width: 1180px) {
   .calendar-layout { grid-template-columns: minmax(180px, .8fr) minmax(250px, 1.4fr); }

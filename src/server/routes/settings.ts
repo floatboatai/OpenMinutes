@@ -7,8 +7,10 @@ import { api } from '../http';
 import { readSettings, writeSetting } from '../sql';
 
 const PATH_KEYS = new Set(['import_dir', 'python_path', 'ffmpeg_path', 'library_dir']);
-const FLAG_KEYS = new Set(['auto_analyze', 'speaker_diarization', 'auto_transcribe', 'auto_connect', 'auto_pull']);
-const TEXT_KEYS: Record<string, number> = { asr_hotwords: 300, device_serial: 64, asr_language: 20 };
+const FLAG_KEYS = new Set(['auto_analyze', 'speaker_diarization', 'auto_transcribe', 'auto_connect', 'auto_pull', 'auto_pull_wifi']);
+const ENUM_KEYS: Record<string, readonly string[]> = { device_transport: ['auto', 'wifi', 'ble'] };
+// 序列号自动识别、device_user_disconnected 只由「断开连接」写入，都不对外开放。
+const TEXT_KEYS: Record<string, number> = { asr_hotwords: 300, asr_language: 20 };
 const NUMBER_KEYS: Record<string, [number, number]> = { auto_connect_minutes: [1, 120] };
 
 function normalize(key: string, raw: unknown): string {
@@ -20,6 +22,11 @@ function normalize(key: string, raw: unknown): string {
   }
   if (FLAG_KEYS.has(key)) {
     if (value !== '0' && value !== '1') throw Object.assign(new Error(`${key} 只能是 0 或 1`), { code: 'INVALID_INPUT' });
+    return value;
+  }
+  const allowed = ENUM_KEYS[key];
+  if (allowed) {
+    if (!allowed.includes(value)) throw Object.assign(new Error(`${key} 只能是 ${allowed.join(' / ')}`), { code: 'INVALID_INPUT' });
     return value;
   }
   const range = NUMBER_KEYS[key];

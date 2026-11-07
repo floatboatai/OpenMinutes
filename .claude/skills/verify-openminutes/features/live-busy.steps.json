@@ -1,0 +1,13 @@
+[
+  {"goto":"#/device"},
+  {"waitText":"录音笔未连接"},
+  {"click":"text=连接"},
+  {"waitText":"断开连接","timeout":60000},
+  {"eval":"(async () => { const r = await fetch('/api/device/sync', {method: 'POST', headers: {'content-type': 'application/json', connection: 'close'}, body: '{}'}); const body = await r.json(); if (!body.ok) throw Error('sync did not start: ' + JSON.stringify(body)); location.hash = '#/live'; const started = Date.now(); while (Date.now() - started < 20000) { const start = [...document.querySelectorAll('main button')].find((b) => b.innerText.trim() === '开始实时字幕'); if (document.body.innerText.includes('录音笔正在同步') && start?.disabled) return { jobId: body.data.jobId, ms: Date.now() - started }; await new Promise((resolve) => setTimeout(resolve, 30)); } throw Error('Live page did not block 开始 while syncing'); })()"},
+  {"expectText":"去录音笔查看"},
+  {"screenshot":"01-live-blocked.png"},
+  {"aria":"01-live-blocked.aria.txt"},
+  {"waitNoText":"录音笔正在同步","timeout":180000},
+  {"eval":"(() => { const start = [...document.querySelectorAll('main button')].find((b) => b.innerText.trim() === '开始实时字幕'); if (!start || start.disabled) throw Error('开始 should be enabled again after the sync'); return 'enabled'; })()"},
+  {"screenshot":"02-live-free.png"}
+]

@@ -1,11 +1,13 @@
-// ABOUTME: 录音详情页：编排元数据、试听、转录、AI 结论与手工整理操作。
+// ABOUTME: 录音详情页：试听、转录、AI 结论与手工整理；页头只有一个随状态切换的主按钮。
 
-import { useEffect, useRef, useState } from 'react';
-import { Archive, ArrowLeft, Check, Download, FileAudio, HardDriveDownload, Pencil, Sparkles, Star, Trash2, Waves } from 'lucide-react';
-import type { Category, RecordingDetail } from '../../contracts/app';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Archive, ArrowLeft, CalendarDays, Check, ChevronDown, Download, FileAudio, Pencil, RotateCcw, Sparkles, Star, Trash2, Waves } from 'lucide-react';
+import type { Category, RecordingDetail, RecordingSummary } from '../../contracts/app';
+import type { CalendarEvent } from '../../contracts/calendar';
 import { isBusyStatus } from '../../contracts/recording-status';
-import { api, errorText } from '../api';
-import { formatBytes, formatDateTime, formatDuration } from '../format';
+import { api } from '../api';
+import { formatBytes, formatDateTime, formatDuration, localDayOf } from '../format';
+import { buildHash } from '../router';
 import { useAsyncData, usePolling } from '../useApi';
 import {
   Button,
@@ -22,17 +24,55 @@ import {
   useToast,
 } from '../components/ui';
 import { AnalysisView, JobsTable, MetaList, TranscriptSegments } from '../components/recording-parts';
-import { CalendarAssociation } from '../components/CalendarAssociation';
+import { ErrorNotice } from '../components/ErrorNotice';
 
 interface Props {
   id: number;
+  backLabel: string;
   onBack: () => void;
   onRemoved: () => void;
 }
 
 type Tab = 'transcript' | 'analysis' | 'jobs';
 
-export function DetailPage({ id, onBack, onRemoved }: Props) {
+/** 日程区只读：关联只在日历页做，这里只给带上下文的跳转。 */
+function CalendarLink({ recording }: { recording: RecordingSummary }) {
+  const eventId = recording.calendarEventId;
+  const linked = useAsyncData<CalendarEvent | null>(
+    () => (eventId ? api.get<CalendarEvent>(`/api/calendar/events/${eventId}`) : Promise.resolve(null)),
+    `detail-event:${eventId ?? 0}`,
+  );
+  const href = buildHash({
+    name: 'calendar',
+    ...(localDayOf(recording.recordedAt ?? recording.createdAt) ? { day: localDayOf(recording.recordedAt ?? recording.createdAt) ?? undefined } : {}),
+    rec: recording.id,
+  });
+  if (!eventId) {
+    return (
+      <p className="calendarlink">
+        <span className="muted">还没有关联日程。</span>
+        <a className="linkbtn" href={href}>
+          在日历中关联
+        </a>
+      </p>
+    );
+  }
+  const event = linked.data;
+  return (
+    <div className="calendarlink">
+      <p className="calendarlink__event">
+        <CalendarDays size={14} aria-hidden="true" />
+        <strong>{event?.summary ?? '已关联的日程'}</strong>
+      </p>
+      {event ? <p className="muted">{event.allDay ? `${event.startTime.slice(0, 10)} 全天` : formatDateTime(event.startTime)}</p> : null}
+      <a className="linkbtn" href={href}>
+        在日历中修改
+      </a>
+    </div>
+  );
+}
+
+export function DetailPage({ id, backLabel, onBack, onRemoved }: Props) {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>('transcript');
   const [plain, setPlain] = useState(false);
@@ -64,11 +104,13 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
   }, [id]);
 
   if (detail.loading && !data) return <Loading label="正在读取录音详情" />;
-  if (detail.error) return <ErrorState message={detail.error} onRetry={detail.reload} />;
+  if (detail.error) return <ErrorState error={detail.error} onRetry={detail.reload} />;
   if (!data) return <Loading />;
 
   const recording = data.recording;
   const hasTranscript = Boolean(data.transcript?.text);
+  const onDevice = recording.status === 'pending' && !recording.hasAudioFile;
+  const title = recording.title || recording.filename;
 
   const run = async (task: () => Promise<unknown>, successText: string) => {
     setPending(true);
@@ -77,7 +119,7 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
       toast.push(successText, 'success');
       detail.reload();
     } catch (error) {
-      toast.push(errorText(error), 'error');
+      toast.error(error);
     } finally {
       setPending(false);
     }
@@ -85,6 +127,20 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
 
   const transcribe = () => void run(() => api.post(`/api/recordings/${id}/transcribe`), '转录任务已排队');
   const organize = () => void run(() => api.post(`/api/recordings/${id}/organize`), '归类任务已排队');
+
+  /** 主动作随状态切换：在录音笔中 → 去同步；待转录 → 开始转录；待归类 → AI 归类；已整理 → 无。 */
+  const primary: { label: string; icon: ReactNode; run: () => void } | null = (() => {
+    if (busy || onDevice || recording.status === 'organized') return null;
+    if (recording.status === 'transcribed' || (recording.status === 'failed' && hasTranscript)) {
+      return { label: 'AI 归类', icon: <Sparkles size={14} aria-hidden="true" />, run: organize };
+    }
+    if (recording.hasAudioFile && !hasTranscript) {
+      return { label: '开始转录', icon: <Waves size={14} aria-hidden="true" />, run: transcribe };
+    }
+    return null;
+  })();
+  const canRetranscribe = recording.hasAudioFile && hasTranscript && !busy;
+  const canReorganize = hasTranscript && Boolean(data.analysis) && !busy;
   const patch = (body: Record<string, unknown>, message: string) =>
     void run(() => api.patch(`/api/recordings/${id}`, body), message);
 
@@ -121,8 +177,13 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
     <div className="page page--detail">
       <div className="detail__topbar">
         <Button variant="quiet" size="sm" icon={<ArrowLeft size={15} aria-hidden="true" />} onClick={onBack}>
-          返回录音库
+          {backLabel}
         </Button>
+        <nav className="breadcrumb" aria-label="当前位置">
+          <a href="#/library">录音</a>
+          <span aria-hidden="true">›</span>
+          <span aria-current="page">{title}</span>
+        </nav>
         <StatusChip status={recording.status} />
       </div>
 
@@ -165,41 +226,19 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
           ) : null}
         </p>
         <div className="detail__actions">
-          <Button
-            variant="primary"
-            size="sm"
-            icon={<Waves size={14} aria-hidden="true" />}
-            disabled={pending || busy || !recording.hasAudioFile}
-            title={recording.hasAudioFile ? '用 Host ASR 识别录音内容' : '缺少音频文件'}
-            onClick={transcribe}
-          >
-            {hasTranscript ? '重新转录' : '开始转录'}
-          </Button>
-          {recording.status === 'pending' && !recording.hasAudioFile ? (
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<HardDriveDownload size={14} aria-hidden="true" />}
-              disabled={pending || busy}
-              onClick={() =>
-                void run(
-                  () => api.post('/api/device/download', { file: recording.filename, serial: recording.deviceSerial ?? '' }),
-                  '已发起拉取，完成后状态会变为待转录',
-                )
-              }
-            >
-              从设备拉取音频
+          {onDevice ? (
+            <p className="detail__ondevice">
+              这条录音还在录音笔里，同步后即可播放和转录。
+              <a className="linkbtn" href="#/device">
+                去录音笔同步
+              </a>
+            </p>
+          ) : null}
+          {primary ? (
+            <Button variant="primary" size="sm" icon={primary.icon} disabled={pending} onClick={primary.run}>
+              {primary.label}
             </Button>
           ) : null}
-          <Button
-            size="sm"
-            icon={<Sparkles size={14} aria-hidden="true" />}
-            disabled={pending || busy || !hasTranscript}
-            title={hasTranscript ? '用 AI 归类并生成摘要' : '需要先完成转录'}
-            onClick={organize}
-          >
-            {data.analysis ? '重新归类' : 'AI 归类'}
-          </Button>
           <Button
             size="sm"
             variant={recording.isFavorite ? 'primary' : 'ghost'}
@@ -221,27 +260,45 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
           >
             导出
           </Button>
-          <Button
-            size="sm"
-            icon={<Archive size={14} aria-hidden="true" />}
-            onClick={() => patch({ isArchived: !recording.isArchived }, recording.isArchived ? '已取消归档' : '已归档')}
-          >
-            {recording.isArchived ? '取消归档' : '归档'}
-          </Button>
-          <Button
-            size="sm"
-            variant="danger"
-            icon={<Trash2 size={14} aria-hidden="true" />}
-            onClick={() => {
-              if (!window.confirm('音频文件会移动到数据目录的 _trash 子目录，确认删除这条记录？')) return;
-              void run(async () => {
-                await api.remove(`/api/recordings/${id}`);
-                onRemoved();
-              }, '录音已删除');
-            }}
-          >
-            删除
-          </Button>
+          <details className="moremenu">
+            <summary className="btn btn--ghost btn--sm">
+              <span>更多</span>
+              <ChevronDown size={13} aria-hidden="true" />
+            </summary>
+            <div className="moremenu__list" role="menu">
+              {canRetranscribe ? (
+                <button type="button" role="menuitem" disabled={pending} onClick={transcribe}>
+                  <RotateCcw size={13} aria-hidden="true" /> 重新转录
+                </button>
+              ) : null}
+              {canReorganize ? (
+                <button type="button" role="menuitem" disabled={pending} onClick={organize}>
+                  <Sparkles size={13} aria-hidden="true" /> 重新归类
+                </button>
+              ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => patch({ isArchived: !recording.isArchived }, recording.isArchived ? '已取消归档' : '已归档')}
+              >
+                <Archive size={13} aria-hidden="true" /> {recording.isArchived ? '取消归档' : '归档'}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="moremenu__danger"
+                onClick={() => {
+                  if (!window.confirm('音频文件会移到数据目录的回收站，确认删除这条录音？')) return;
+                  void run(async () => {
+                    await api.remove(`/api/recordings/${id}`);
+                    onRemoved();
+                  }, '录音已删除');
+                }}
+              >
+                <Trash2 size={13} aria-hidden="true" /> 删除
+              </button>
+            </div>
+          </details>
         </div>
         {exported ? <p className="detail__export">已复制到：{exported}</p> : null}
       </header>
@@ -260,15 +317,22 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
       ) : null}
 
       {!busy && data.lastError ? (
-        <div className="alert" role="alert">
-          <strong>上次处理未成功：</strong> {data.lastError}
-        </div>
+        <ErrorNotice
+          error={{
+            code: data.lastErrorCode ?? 'INTERNAL_ERROR',
+            message: `上次处理未成功：${data.lastError}`,
+            ...(data.lastErrorDetail ? { detail: data.lastErrorDetail } : {}),
+          }}
+          onRetry={primary?.run}
+        />
       ) : null}
 
       <div className="detail__grid">
         <div className="detail__main">
           <Card tight>
-            {audioBroken ? (
+            {!recording.hasAudioFile ? (
+              <p className="muted">{onDevice ? '同步到电脑后即可播放。' : '这条录音缺少音频文件。'}</p>
+            ) : audioBroken ? (
               <p className="notice">当前环境无法内嵌播放这段音频，请用「导出」交给本机播放器。</p>
             ) : (
               <audio
@@ -298,7 +362,7 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
               options={[
                 { value: 'transcript', label: '转录全文' },
                 { value: 'analysis', label: 'AI 结论' },
-                { value: 'jobs', label: `执行记录${data.jobs.length > 0 ? ` ${data.jobs.length}` : ''}` },
+                { value: 'jobs', label: `处理记录${data.jobs.length > 0 ? ` ${data.jobs.length}` : ''}` },
               ]}
               onChange={(value) => setTab(value as Tab)}
             />
@@ -317,14 +381,12 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
                   title="还没有转录文本"
                   description={
                     recording.hasAudioFile
-                      ? '点击「开始转录」，会用本机 ffmpeg 解码后送入语音识别。'
-                      : '这条录音缺少音频文件，请先在设备页完成拉取或导入。'
+                      ? '点页面上方的「开始转录」，识别结果会显示在这里。'
+                      : onDevice
+                        ? '同步到电脑后才能转录。'
+                        : '这条录音缺少音频文件。'
                   }
-                  action={
-                    <Button size="sm" variant="primary" disabled={pending || busy || !recording.hasAudioFile} onClick={transcribe}>
-                      开始转录
-                    </Button>
-                  }
+                  action={onDevice ? <a className="linkbtn" href="#/device">去录音笔同步</a> : undefined}
                 />
               ) : plain ? (
                 <p className="transcript-plain">{data.transcript?.text}</p>
@@ -345,24 +407,18 @@ export function DetailPage({ id, onBack, onRemoved }: Props) {
               ) : (
                 <Empty
                   title="还没有 AI 归类结果"
-                  description="归类会生成标题、摘要、分类、标签、要点与待办事项。"
-                  action={
-                    <Button size="sm" variant="primary" disabled={pending || busy || !hasTranscript} onClick={organize}>
-                      AI 归类
-                    </Button>
-                  }
+                  description={hasTranscript ? '点页面上方的「AI 归类」，会生成标题、摘要、分类、标签、要点与待办事项。' : '转录完成后才能进行 AI 归类。'}
                 />
               )}
             </Card>
           ) : null}
 
-          {tab === 'jobs' ? <Card>{data.jobs.length === 0 ? <Empty title="还没有执行记录" /> : <JobsTable jobs={data.jobs} />}</Card> : null}
+          {tab === 'jobs' ? <Card>{data.jobs.length === 0 ? <Empty title="还没有处理记录" /> : <JobsTable jobs={data.jobs} />}</Card> : null}
         </div>
 
         <aside className="detail__side">
-          <Card title="日历事件">
-            <CalendarAssociation id={id} eventId={recording.calendarEventId} revision={recording.status} onChanged={detail.reload} />
-            <a href="#/calendar">在日历视图中关联或新建事件</a>
+          <Card title="日程">
+            <CalendarLink recording={recording} />
           </Card>
           <Card title="整理">
             <Field label="分类">

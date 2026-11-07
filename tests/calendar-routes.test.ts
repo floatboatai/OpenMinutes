@@ -42,15 +42,19 @@ test('calendar HTTP import, range, creation, linking, detail and Host error enve
     assert.equal(manual.data.summary, '手动归档');
     app.database.exec("INSERT INTO recordings(id,filename,dedupe_key,recorded_at) VALUES (1,'test.mp3','test','2026-10-29T00:15:00.000Z')");
     assert.equal((await request('/api/recordings/1/calendar-suggestions')).data[0].event.id, id);
-    assert.equal((await request('/api/recordings/1', 'PUT', { calendar_event_id: 'bad' })).code, 'INVALID_INPUT');
-    assert.equal((await request('/api/recordings/1', 'PUT', { calendar_event_id: 999 })).code, 'NOT_FOUND');
-    assert.equal((await request('/api/recordings/1', 'PUT', { calendar_event_id: id })).data.recording.calendarEventId, id);
+    assert.equal((await request('/api/recordings/1', 'PATCH', { calendarEventId: 'bad' })).code, 'INVALID_INPUT');
+    assert.equal((await request('/api/recordings/1', 'PATCH', { calendarEventId: 999 })).code, 'NOT_FOUND');
+    assert.equal((await request('/api/recordings/1', 'PATCH', { calendarEventId: null })).data.recording.calendarEventId, null);
+    assert.equal((await request('/api/recordings/1', 'PATCH', { calendarEventId: id })).data.recording.calendarEventId, id);
+    // The legacy PUT alias is gone: one write path per resource.
+    const legacy = await fetch(`${url}/api/recordings/1`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(legacy.status, 404);
     assert.equal((await request('/api/recordings/1')).data.recording.calendarEventId, id);
     assert.equal((await request(`/api/calendar/events/${id}/recordings`)).data.length, 1);
     assert.equal((await request(`/api/calendar/recordings${range}`)).data.length, 1);
     assert.equal((await request(`/api/calendar/events/${id}/digest`)).data.digest, null);
-    assert.match((await request(`/api/calendar/events/${id}/digest`, 'POST', {})).error, /LLM 不可用/);
-    assert.equal((await request('/api/recordings/1', 'PUT', { calendar_event_id: null })).data.recording.calendarEventId, null);
+    assert.match((await request(`/api/calendar/events/${id}/digest`, 'POST', {})).error, /AI 整理暂不可用/);
+    assert.equal((await request('/api/recordings/1', 'PATCH', { calendarEventId: null })).data.recording.calendarEventId, null);
     assert.equal((await request('/api/calendar/events/999/digest')).code, 'NOT_FOUND');
   } finally {
     await close?.();
