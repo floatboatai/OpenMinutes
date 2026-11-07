@@ -16,26 +16,41 @@ English | [简体中文](README.zh-CN.md)
 
 ### OpenMinutes Workbench
 
-![OpenMinutes recording overview with device status, recording statistics, categories, and recent recordings](docs/images/openminutes-workbench.png)
+![OpenMinutes workbench UI](docs/images/openminutes-workbench.png)
 
 ## Why OpenMinutes?
 
 Recordings accumulate every day, but finding a particular conversation or listening back to everything becomes difficult.
 
-This workbench connects import, transcription, classification, and search in one workflow. Each recording has a clear stage label: awaiting download, awaiting transcription, transcription queued, transcribing, awaiting classification, classification queued, classifying, archived, or failed. Batch operations use the selected recordings.
+This workbench connects sync, transcription, classification, and search in one workflow. Each recording has a clear stage label: on recorder, awaiting transcription, transcription queued, transcribing, awaiting classification, classification queued, classifying, organized, or failed. Batch operations use the selected recordings, or every recording in the current stage.
 
 ## Features
 
-| Capability | Description |
+The left navigation has six fixed items. Every feature has exactly one entry point, and each page title matches its navigation label (the UI is in Chinese; English names are given here):
+
+| Navigation | What the page owns |
 | --- | --- |
-| Three import methods | Scan a directory, register a device file manifest, or download directly over BLE (requires local Python, `bleak`, and a physical device) |
-| Streaming transcription | Decode audio to 16 kHz mono PCM16 with `ffmpeg`, stream it through Host ASR, and store the full text and timestamped segments |
-| AI classification | Use the Host LLM to generate structured titles, summaries, categories, tags, key points, action items, and importance levels, with manual editing |
-| Search and review | Search transcript text, titles, and summaries; filter by category, tag, or stage; sort by time; and process recordings in batches |
-| Recording details and playback | Play audio with HTTP Range support, seek to sentence timestamps, and review separate transcript, AI analysis, and execution-history sections |
-| Category management | Create, rename inline, recolor, and delete custom categories; built-in categories cannot be deleted |
-| Device setup | Check the environment (Python, `bleak`, SDK, and `ffmpeg`), configure the import directory, browse the SDK command reference, and register recordings manually |
-| Live captions | Stream device audio through Host ASR, then save the recording and any transcript when stopped |
+| Recordings (录音, default) | Stats bar (click "failed N" to filter failures), full-text search over transcripts, titles, and summaries, stage/category/tag filters and sorting, batch or "transcribe all / organize all (N)", and the **Import** dialog that scans a local folder. A recording's detail page offers HTTP Range playback, sentence-timestamp seeking, transcript / AI analysis / processing-history sections, manual edits, export, and deletion; its header has a single primary action that follows the recording's state |
+| Recorder (录音笔) | Connect / disconnect, battery and free space, sync (with progress and **Stop**), the "still on the recorder" list with per-item sync, cleanup of already-synced recordings to free recorder space, and auto-connect status. The recorder clock is synced on connect |
+| Live captions (实时字幕) | Stream recorder audio through Floatboat speech recognition, then save the recording and any text when stopped |
+| Calendar (日历) | Day view of events and recordings, linking recordings to events (the only place to do so), new events, `.ics` import, and meeting digests |
+| Categories (分类) | Create, rename inline, recolor, and delete custom categories (built-in ones cannot be deleted); each shows its recording count and total duration |
+| Settings (设置) | General (folders) / Automation / Recognition / Diagnostics & advanced. Diagnostics & advanced is the single place for technical detail: environment checks and "let the Floatboat assistant repair", Python/ffmpeg paths, transport, recent recorder operations, Host capabilities, the device protocol reference, and developer tools |
+
+Transcription decodes audio to 16 kHz mono PCM16 with `ffmpeg` and streams it through Host ASR, storing the full text and timestamped segments. AI classification uses the Host LLM to produce structured titles, summaries, categories, tags, key points, action items, and importance.
+
+Errors show a one-sentence Chinese conclusion and a next step. Technical detail (exception type, exit code, Host error code) appears only after clicking "view details", and the full log lives in Settings › Diagnostics & advanced.
+
+### Recorder transport
+
+- For a user-initiated sync, a batch totalling at least 1 MiB (or containing recordings of unknown size) uses the recorder's **wireless fast transfer** (Wi-Fi hotspot + FTP) by default; smaller batches use Bluetooth. A note under the button warns that the computer will be briefly offline.
+- During wireless fast transfer the computer joins the recorder's hotspot and loses internet access. Running transcription/classification tasks finish first (up to 3 minutes; otherwise the batch uses Bluetooth), new AI tasks queue, and other online operations such as calendar digests return "try again later". Afterwards the computer reconnects to its original network and the recorder's hotspot is turned off.
+- If wireless fast transfer fails at any stage, sync continues over Bluetooth. The UI shows a single "switched to Bluetooth" notice; the reason is under "view details".
+- Sync does not start while the recorder is recording. A download is attached to the library only if its size matches what the recorder reported.
+- Background auto-sync never switches networks by default: it uses Bluetooth for recordings under 1 MiB (at most 3 per round) and leaves larger ones for a manual sync. Enable `auto_pull_wifi` under Settings › Automation to allow wireless fast transfer in the background.
+- A fixed transport (auto / always wireless / always Bluetooth) is set under Settings › Diagnostics & advanced.
+- A user-initiated connection disconnects after 10 idle minutes to save recorder battery; auto-connect sessions disconnect as soon as their work is done. After a manual **Disconnect**, auto-connect stays paused until you click **Connect** again.
+- Platform requirements: Windows needs a wireless adapter (uses the built-in `netsh`); macOS needs Wi-Fi; Linux needs NetworkManager (`nmcli`). macOS and Linux support is experimental and falls back to Bluetooth on failure.
 
 ## Getting started
 
@@ -56,11 +71,11 @@ Then use Floatboat's `check_workbench_project` to run type checks and build the 
 | Dependency | Purpose | Behavior when missing |
 | --- | --- | --- |
 | `ffmpeg` | Audio probing and decoding | Transcription is unavailable, and the UI reports it |
-| `python` + `bleak` + `memotalk-sdk` | Download device recordings over BLE | The device page reports "not ready"; directory import remains available |
+| `python` + `bleak` + `memotalk-sdk` | Connect to the recorder, sync recordings, and live captions | The recorder page says the recorder component is not ready and links to diagnostics; local folder import remains available |
 
 Tool discovery tries configured paths, Floatboat's bundled tools, `PATH`, and command names in that order, so it does not rely solely on the process `PATH`.
 
-Check the device page for the Python interpreter in use, then install the SDK into that same environment:
+Check Settings › Diagnostics & advanced › Environment for the Python interpreter in use, then install the device SDK into that same environment:
 
 ```bash
 uv pip install --python "/path/to/python" "memotalk-sdk>=0.1.0"
@@ -72,11 +87,13 @@ The SDK installs `bleak` automatically; you do not need to clone its source or c
 The app uses `from memotalk import MemoTalkClient` for device APIs and live audio streaming.
 Upgrading removes the old `sdk_dir` setting while preserving other path, recognition, and automation settings.
 
-### SDK regression tests
+For hardware specifications and firmware questions, join the Floatboat official community group (see [Community](#community)).
 
-`pnpm test` runs the server tests. SDK integration tests use the package's simulated device and do not connect to a physical recorder.
+### Device SDK regression tests
+
+`pnpm test` runs the server tests. Device SDK integration tests drive the device worker (connect, listing, Bluetooth and wireless transfer, cancellation, network restore) with the package's simulated device. They do not connect to a physical recorder or call the real `netsh` / `nmcli` / `networksetup`.
 Set the `MEMOTALK_TEST_PYTHON` environment variable to the path of a Python interpreter with `memotalk-sdk` installed before running them.
-Without this variable, SDK integration tests are skipped; settings API and migration tests still run.
+Without this variable, these tests are skipped; settings API and migration tests still run.
 
 ### CI
 
@@ -96,33 +113,43 @@ verification steps under `.claude/skills/verify-openminutes`.
 
 ```text
 src/
-  contracts/       Shared DTOs (app.ts), input validation (input.ts), busy states (recording-status.ts)
+  contracts/       Shared DTOs (app.ts, device.ts, calendar.ts, preflight.ts), error model (errors.ts), input validation (input.ts), busy states (recording-status.ts)
   server/          Node server: assembly, routing, and domain logic
-    index.ts       Server assembly and automatic-connection startup
+    index.ts       Server assembly: device service, auto-connect scheduler, route registration
     routes/        HTTP routes grouped by domain
-    app-route.ts   App metadata, overview, and tag-list routes
-    http.ts        Shared API envelope and top-level error/code mapping
+    app-route.ts   App metadata, statistics, and tag-list routes
+    http.ts        Shared API envelope; AppError / system errors -> Chinese error + code + detail
     sql.ts         Thin node:sqlite wrapper, settings, and job records
     repo.ts        Queries, transient queued-status projection, and library-wide hasActiveTasks
     library.ts     Library root, monthly folders, and legacy audio-path resolution
-    ingest.ts      Directory scanning, manifest registration, deduplication, naming conflicts
-    pull.ts        BLE download staging, library attachment, and pending-file pulls
-    auto-connect.ts Background device checks and optional automatic pulls
+    ingest.ts      Directory scanning, manifest registration, download attachment, deduplication, naming conflicts
+    device/        Sole owner of the device SDK (memotalk-sdk)
+      service.ts     Connection state machine, single mutex, idle disconnect, live-caption handoff, diagnostics log
+      sync.ts        Sync orchestration (list -> register -> transfer -> size check -> attach) and cleanup
+      transport.ts   Transport planning (wireless fast transfer / Bluetooth) and wireless-adapter probing
+      worker.ts      Spawns the resident Python worker and speaks JSON-lines RPC
+      worker-script.ts Worker Python source: connect, list, sync, delete, network join and restore
+      errors.ts      Device SDK exceptions -> Chinese error codes
+      auto-connect.ts Auto-connect scheduler (disconnects when done; paused after manual disconnect)
+      fake-device.ts Fake recorder (tests only; loaded when OPENMINUTES_FAKE_DEVICE is set)
+    network-gate.ts Network gate during wireless transfer: pauses AI tasks, fails off-queue calls fast
     media.ts       ffmpeg probing, duration parsing, and PCM16 framing
     transcribe.ts  Host ASR sessions: parameter fallback, streaming, resumption, error classification
     organize.ts    Host LLM structured classification and text fallback
     pipeline.ts    Transcription/classification state machines and retries
-    jobs.ts        Task scheduling and automatic transcription after import/download
+    jobs.ts        Task scheduling and automatic transcription after import/sync
     queue.ts       Serial task execution, pending/running labels, and task-state queries
-    bridge.ts      memotalk-sdk Python API bridge (fixed arguments, no concatenated commands)
-    sdk-script.ts  Python script for SDK status, listing, and download actions
-    live.ts        Live audio capture, file storage, and session persistence
+    calendar*.ts   Calendar events, .ics import, recording links, and meeting digests
+    preflight.ts   Environment checks and the Host capability list
+    environment-repair.ts, repair-store.ts Floatboat-assistant environment repair
+    runtime-probe.ts, tools.ts, paths.ts Python / bleak / device SDK / ffmpeg discovery and paths
+    live.ts        Live-caption sessions, file storage, and saving (capture process spawned by the device service)
     live-audio.ts  Live MP3 decoder arguments and one-second PCM framing
     live-asr.ts    On-demand live ASR sessions and frame streaming
-    live-script.ts Python script for SDK live audio streaming
-  ui/              React UI: overview / library / details / device / categories / live / settings
-migrations/        Append-only SQLite migrations
-sdk/               Host-provided Workbench runtime, clients, contracts, and types
+    live-script.ts Python script for device SDK live audio streaming
+  ui/              React UI: recordings / details / recorder / live captions / calendar / categories / settings (incl. diagnostics)
+migrations/        Append-only SQLite migrations (0001-0007)
+sdk/               Host SDK: Host-provided Workbench runtime, clients, contracts, and types (not modified)
 tests/             Server tests
 manifest.json      Host entry points, build profile, capabilities, and audio resource
 index.html         UI build entry point
@@ -132,13 +159,15 @@ Related documentation (in Chinese): [requirements](REQUIREMENTS.md), [engineerin
 
 ## Data model
 
-`devices`, `recordings`, `transcripts`, `analyses`, `categories`, `tags`, `recording_tags`, `job_runs`, `sdk_commands`, and `settings`.
+`devices`, `recordings`, `transcripts`, `analyses`, `categories`, `tags`, `recording_tags`, `job_runs`, `sdk_commands`, `settings`, `calendar_events`, and `environment_repairs`.
+
+Transcription/classification failures are stored in three columns: `recordings.last_error` (Chinese conclusion), `last_error_code`, and `last_error_detail` (technical text). `devices.ble_address` remembers the last connected recorder so the next connection prefers it; no serial number needs to be entered.
 
 ### Storage and directories
 
 - `import_dir` is the scan source and the default audio export destination, defaulting to `~/memo/memotalk/inbox`. Scans create a missing directory, read only its immediate files, and copy supported audio (`.mp3`, `.wav`, `.m4a`, `.aac`, `.ogg`, `.flac`, `.amr`, `.opus`) into the library without removing the originals.
-- `library_dir` defaults to `~/memo/memotalk/raw`. Imports and BLE downloads are copied into `<library_dir>/<yyyy-MM>/`, using the recording month inferred from the filename or a fallback date. Live recordings also go into monthly folders. Use an absolute path or `~/...` for these directory settings; changing the library setting does not relocate existing files.
-- New `recordings.storage_path` values store the full destination path (absolute with the default or an absolute library directory). Historical relative filenames resolve against the Host's `audio` data resource. BLE downloads first use the Host's `audio/_incoming` staging directory, not `import_dir`.
+- `library_dir` defaults to `~/memo/memotalk/raw`. Imports and recorder syncs are copied into `<library_dir>/<yyyy-MM>/`, using the recording month inferred from the filename or a fallback date. Live recordings also go into monthly folders. Use an absolute path or `~/...` for these directory settings; changing the library setting does not relocate existing files.
+- New `recordings.storage_path` values store the full destination path (absolute with the default or an absolute library directory). Historical relative filenames resolve against the Host's `audio` data resource. Recorder syncs first stage files in the Host's `audio/_incoming/<job id>/` (one directory per sync, removed afterwards), not `import_dir`.
 - Deletion attempts to move audio to `<library_dir>/_trash/<milliseconds>-<basename>` using the **current** library setting, then deletes the recording and its transcript, analysis, tag links, and job history. If the move fails, database deletion still proceeds; `audioMovedToTrash` is then `null`. There is no restore API.
 - Export copies the audio under its original `filename` into `import_dir`, or into the request body's optional `directory`. It creates missing destination directories and can overwrite a same-named file. The detail page uses the default destination. There is no separate export-directory setting.
 
@@ -146,55 +175,78 @@ When resolving `import_dir`, an empty value falls back to the default; a path in
 
 ## Settings
 
-The settings page edits paths, automation, and recognition options. The device page edits only `import_dir`. `PATCH /api/settings` accepts `{ "values": { "key": "value" } }`; all values must be strings.
+The settings page has four sections, and every path is edited only here:
+
+| Section | Contents |
+| --- | --- |
+| General | `library_dir`, `import_dir` |
+| Automation | `auto_transcribe`, `auto_analyze`, `auto_connect`, `auto_connect_minutes`, `auto_pull` (sync new recordings after connecting), `auto_pull_wifi` (allow wireless fast transfer for large recordings in background sync) |
+| Recognition | `speaker_diarization`, `asr_hotwords`, `asr_language` |
+| Diagnostics & advanced (`#/settings/diagnostics`, collapsed by default) | Environment, `python_path` / `ffmpeg_path`, `device_transport`, recent recorder operations, Host capabilities, device protocol reference, developer tools (manual manifest registration), copy diagnostics report |
+
+`PATCH /api/settings` accepts `{ "values": { "key": "value" } }`; all values must be strings.
 
 | Keys | Behavior and defaults |
 | --- | --- |
 | `library_dir`, `import_dir` | Empty by default; resolved as described above; at most 500 characters each |
 | `python_path`, `ffmpeg_path` | Empty by default for automatic discovery; at most 500 characters each |
-| `auto_transcribe`, `auto_analyze` | Automatically transcribe after import/download and classify after transcription; both default to `"1"` |
-| `auto_connect`, `auto_pull` | Background device checks and pending-file downloads after a successful automatic connection; both default to `"1"` |
+| `auto_transcribe`, `auto_analyze` | Automatically transcribe after import/sync and classify after transcription; both default to `"1"` |
+| `auto_connect`, `auto_pull` | Auto-connect to the recorder on an interval; sync new recordings once connected (a manual **Connect** also starts a sync right away); both default to `"1"` |
+| `auto_pull_wifi` | Whether background sync may use wireless fast transfer (briefly offline), default `"0"` |
+| `device_transport` | `auto` (default) / `wifi` / `ble`; fixes the transport |
 | `auto_connect_minutes` | Integer string from `"1"` to `"120"`, default `"3"` |
 | `speaker_diarization` | File-transcription speaker separation, default `"1"` |
 | `asr_hotwords` | File-transcription hotwords, empty by default; at most 300 characters |
 | `asr_language` | At most 20 characters; the UI offers automatic (empty), `zh`, `en`, and `ja`. Currently saved as file-transcription metadata, but not passed to ASR |
-| `device_serial` | At most 64 characters; saved by device operations or via the API, not a field on the settings page |
 
-Flags accept only `"0"` or `"1"`. Background checks run while the workbench server is open; manual status checks do not trigger automatic pulls. Live ASR currently uses fixed PCM parameters rather than the file-transcription hotword, language, or speaker settings. `GET /api/settings` can also return runtime-written `last_auto_connect_at` and `last_auto_pull_at`; these are not writable through PATCH. The removed `sdk_dir` is hidden on reads and ignored on writes; other unknown keys are rejected.
+Flags accept only `"0"` or `"1"`. Auto-connect runs while the workbench server is open and disconnects when done. Live ASR currently uses fixed PCM parameters rather than the file-transcription hotword, language, or speaker settings. `GET /api/settings` can also return runtime-written `device_serial`, `device_user_disconnected`, `last_auto_connect_at`, and `last_auto_pull_at`; these are not writable through PATCH (`device_user_disconnected` is set only by **Disconnect** and cleared by **Connect**). The removed `sdk_dir` is hidden on reads and ignored on writes; other unknown keys are rejected.
 
 ## API overview
 
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/api/app` | Application name and version |
-| `GET` | `/api/overview` | Recording statistics, device status, and overview data |
+| `GET` | `/api/overview` | Recording statistics (total, duration, awaiting transcription, failed, on-recorder `pendingCount`) and per-category counts/durations `byCategory` |
 | `GET` | `/api/tags` | Tag names for filtering |
 | `GET` | `/api/recordings` | List recordings with search, stage/category/tag/favorite/archive filters, sorting, and pagination; data contains `items`, `total`, and library-wide `hasActiveTasks` |
-| `GET` | `/api/recordings/:id` | Details: metadata, transcript, AI analysis, and execution history |
+| `GET` | `/api/recordings/:id` | Details: metadata, transcript, AI analysis, and processing history |
 | `GET` | `/api/recordings/:id/tags` | Tag IDs and names for one recording |
-| `PATCH` | `/api/recordings/:id` | Edit title, summary, category, tags, importance, favorite, and archive flags |
+| `PATCH` | `/api/recordings/:id` | Edit title, summary, category, tags, importance, favorite, and archive flags; `calendarEventId` (positive integer or `null`) is the only write path for recording-event links |
 | `DELETE` | `/api/recordings/:id` | Delete a recording; attempt to move audio to `<library_dir>/_trash/<milliseconds>-<basename>` |
 | `GET` | `/api/recordings/:id/audio` | Audio stream with HTTP Range support (206 and `content-range`; 416 for out-of-range requests) |
 | `POST` | `/api/recordings/:id/export` | Copy audio to `import_dir` by default; optional body field `directory` overrides it |
 | `POST` | `/api/recordings/:id/transcribe` | Queue transcription; after prerequisite checks, reject already queued/running recordings with `BUSY` |
 | `POST` | `/api/recordings/:id/organize` | Queue AI classification; after prerequisite checks, reject already queued/running recordings with `BUSY` |
-| `POST` | `/api/recordings/batch/transcribe`, `/api/recordings/batch/organize` | Queue transcription or classification for body field `ids`; skip already queued/running or otherwise ineligible recordings |
+| `POST` | `/api/recordings/batch/transcribe`, `/api/recordings/batch/organize` | Queue transcription or classification for body field `ids`, or pass `{ stage: "ready" }` / `{ stage: "transcribed" }` to let the server select every recording in that stage (up to 400). Skip already queued/running or otherwise ineligible recordings |
 | `GET` | `/api/ingest/directory` | Read import directory information |
-| `POST` | `/api/ingest/directory/ensure` | Create the import directory |
-| `POST` | `/api/ingest/scan` | Scan the import directory |
-| `POST` | `/api/ingest/manifest` | Register device manifest entries |
-| `GET` | `/api/device` | Environment checks, SDK command reference, Host capability summary, device records, and settings |
-| `GET` | `/api/device/summary` | Device/local recording counts and device/category counts |
-| `GET` | `/api/device/capabilities` | Host ASR/LLM operation availability, not BLE commands |
-| `DELETE` | `/api/device/:id` | Remove a local device record and clear its matching saved serial; does not delete recordings or device files |
-| `POST` | `/api/device/check`, `/api/device/list`, `/api/device/download`, `/api/device/status` | Environment check, file listing, BLE download, and status |
+| `POST` | `/api/ingest/scan` | Scan the import directory (created if missing) |
+| `POST` | `/api/ingest/manifest` | Manually register recorder manifest entries (diagnostics developer tool only) |
+| `GET` | `/api/device` | Recorder view: connection state, battery and space, sync progress, last result, recordings still on the recorder, cleanable count, auto-connect status. Reads memory and caches only; never spawns probes |
+| `POST` | `/api/device/connect` | Connect and sync the recorder clock; starts a sync right away when `auto_pull` is on. Returns the recorder view |
+| `POST` | `/api/device/disconnect` | Disconnect and pause auto-connect until the next manual connect |
+| `POST` | `/api/device/sync` | Sync all new recordings (list, register, transfer); returns `{ jobId }` immediately |
+| `POST` | `/api/device/pull` | Sync specific recordings, body `{ ids }` (1-100); returns `{ jobId }` |
+| `POST` | `/api/device/cancel` | Stop the running sync (cooperative; wireless transfer restores the network first) |
+| `POST` | `/api/device/cleanup` | Delete already-synced, size-verified recordings from the recorder; returns `{ jobId }` |
+| `GET` | `/api/diagnostics` | Diagnostics data: environment, recent recorder operations, transport setting and measured speeds, device protocol reference, Host capabilities |
+| `GET` | `/api/environment` | Environment check report and repair task state |
+| `POST` | `/api/environment/check` | Re-run the environment check |
+| `POST` | `/api/environment/repair` | Ask the Floatboat assistant to repair the environment |
+| `GET` | `/api/environment/capabilities` | Host ASR/LLM operation availability |
 | `GET` | `/api/live` | Live caption status |
-| `POST` | `/api/live/start`, `/api/live/stop` | Start or stop live captions |
+| `POST` | `/api/live/start`, `/api/live/stop` | Start or stop live captions; returns `DEVICE_BUSY` while the recorder is syncing |
+| `GET`, `POST` | `/api/calendar/events` | List events in a time range, or create an event |
+| `GET` | `/api/calendar/events/:id` | One event |
+| `GET` | `/api/calendar/events/:id/recordings`, `/api/calendar/recordings` | Recordings linked to an event, or recordings in a time range |
+| `GET`, `POST` | `/api/calendar/events/:id/digest` | Read or generate an event's meeting digest |
+| `POST` | `/api/calendar/digest` | Generate a daily digest |
+| `POST` | `/api/calendar/import` | Import an `.ics` file |
+| `GET` | `/api/recordings/:id/calendar-suggestions` | Suggest events to link based on the recording time |
 | `GET`, `POST` | `/api/categories` | List or create categories |
 | `PATCH`, `DELETE` | `/api/categories/:id` | Update or delete a category |
 | `GET`, `PATCH` | `/api/settings` | Read settings or update the writable keys listed above |
 
-JSON responses use the `{ ok: true, data }` / `{ ok: false, error: string, code: string }` envelope. The audio endpoint returns an audio stream on success.
+JSON responses use the `{ ok: true, data }` / `{ ok: false, error, code, detail?, action? }` envelope: `error` is a one-sentence Chinese conclusion, `detail` holds the technical text (shown only under "view details"), and `action` is an optional link to the next step. Node system errors are mapped by errno to Chinese messages (no permission, disk full, file moved). The audio endpoint returns an audio stream on success. Online operations return `NETWORK_PAUSED` during wireless fast transfer.
 
 ### Queued tasks and polling
 
@@ -206,7 +258,10 @@ JSON responses use the `{ ok: true, data }` / `{ ok: false, error: string, code:
 
 ## Design principles
 
-- Report failures honestly. If BLE is not ready, audio cannot play, or upstream ASR fails, the UI reports the problem and offers a next action.
+- One entry point per feature. Connect, disconnect, sync, and cleanup live only on the Recorder page; import only in the Recordings header; recording-event links only on the Calendar page; paths only in Settings. Other pages only link there.
+- Two-layer errors. The main UI shows a Chinese conclusion and a next step; technical detail appears only under "view details", with the full log in Settings › Diagnostics & advanced.
+- Background work never changes the network. Wireless fast transfer runs only for manual syncs, or in the background when `auto_pull_wifi` is enabled.
+- Report failures honestly. If the recorder component is not ready, audio cannot play, or upstream ASR fails, the UI reports the problem and offers a next action.
 - Communicate status with both text and color, never color alone. Animations respect `prefers-reduced-motion`.
 - Prioritize lists. Each recording occupies one row, content is at most 1220 px wide, and table numbers use `tabular-nums` for alignment.
 - Support accessibility. Icon-only buttons have `aria-label` and `title`; segmented controls use `aria-pressed`.
@@ -215,7 +270,11 @@ See [DESIGN.md](DESIGN.md) for more design decisions.
 
 ## Related repositories
 
-- [`floatboatai/memotalk-sdk`](https://github.com/floatboatai/memotalk-sdk): Python BLE client and CLI for the MemoTalk S1
+- [`floatboatai/memotalk-sdk`](https://github.com/floatboatai/memotalk-sdk): Python client (Bluetooth, Wi-Fi hotspot, and FTP) and CLI for the MemoTalk S1
+
+## Community
+
+Hardware details for MemoTalk S1 are shared in the Floatboat official WeChat community group — scan the QR code in [README.zh-CN.md](README.zh-CN.md#加入-floatboat-官方交流群).
 
 ## License
 

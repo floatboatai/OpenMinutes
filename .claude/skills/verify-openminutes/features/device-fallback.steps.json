@@ -1,0 +1,18 @@
+[
+  {"goto":"#/device"},
+  {"waitText":"录音笔未连接"},
+  {"eval":"(async () => { const r = await fetch('/api/settings', {method: 'PATCH', headers: {'content-type': 'application/json', connection: 'close'}, body: JSON.stringify({values: {auto_pull: '1'}})}); if (!(await r.json()).ok) throw Error('PATCH auto_pull failed'); return 'auto_pull=1'; })()"},
+  {"click":"text=连接"},
+  {"waitText":"已改用蓝牙","timeout":180000},
+  {"waitText":"已同步 3 条录音","timeout":180000},
+  {"expectNoText":"WIFI_JOIN_FAILED"},
+  {"expectNoText":"netsh"},
+  {"screenshot":"01-fallback.png"},
+  {"aria":"01-fallback.aria.txt"},
+  {"eval":"(() => { const notice = [...document.querySelectorAll('.errornotice')].find((n) => n.innerText.includes('已改用蓝牙')); if (!notice) throw Error('No fallback notice'); if (notice.getAttribute('role') !== 'status') throw Error('Fallback must be a notice, not an alert'); const toggle = [...notice.querySelectorAll('button')].find((b) => b.innerText.includes('查看详情')); if (!toggle || toggle.getAttribute('aria-expanded') !== 'false') throw Error('Details should start collapsed'); toggle.click(); return 'expanded'; })()"},
+  {"waitText":"WIFI_JOIN_FAILED"},
+  {"expectText":"复制诊断信息"},
+  {"screenshot":"02-detail.png"},
+  {"aria":"02-detail.aria.txt"},
+  {"eval":"(async () => { const d = (await (await fetch('/api/device', {headers: {connection: 'close'}})).json()).data; const fb = d.lastResult?.fallback; if (fb?.code !== 'WIFI_FALLBACK' || !/WIFI_JOIN_FAILED/.test(fb.detail ?? '') || d.lastResult.transport !== 'ble' || d.lastResult.done !== 3) throw Error('Unexpected lastResult: ' + JSON.stringify(d.lastResult)); return d.lastResult; })()"}
+]

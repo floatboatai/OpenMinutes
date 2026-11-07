@@ -65,3 +65,18 @@ export function relativeTime(iso: string | null | undefined): string {
   if (days <= 7) return `${days} 天前`;
   return formatDateTime(iso);
 }
+
+export function formatTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '—';
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** 录音时间 → 本地日期 YYYY-MM-DD，用于跳到日历对应的那一天。 */
+export function localDayOf(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}

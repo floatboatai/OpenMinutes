@@ -6,7 +6,7 @@
 
 - 先按 SKILL.md 完成 build → launch → doctor。仅驱动本 run 的隔离实例，保留四个自动开关为 `0`，不使用用户 Floatboat 应用的数据库。
 - `launch.mjs` 默认连接运行中的 Floatboat Host；显式 `--no-host` 仅验证独立模式。按 SKILL.md 的 Host 启动说明创建 run，不要手工拼 IPC 配置或操作用户的真实实例。
-- Host 模式必须通过该版本 doctor，并在设备页「本机环境」确认「语音识别」「文本模型」就绪。将环境截图与 ARIA 保存到 `$E/host-preflight/`。只看到 Host 进程在运行不算通过；`HOST_NOT_CONNECTED`、权限不足或额度不足时停止。
+- Host 模式必须通过该版本 doctor，并在「设置 › 诊断与高级 › 本机环境」（`#/settings/diagnostics`）确认「语音识别与 AI 整理」分组就绪。将环境截图与 ARIA 保存到 `$E/host-preflight/`。只看到 Host 进程在运行不算通过；`HOST_NOT_CONNECTED`、权限不足或额度不足时停止。
 - ASR/LLM 会消耗用户额度。确认允许使用额度后，单条只转录一次、归类一次；批量只处理另外两条。正常共 3 个转录任务、3 个归类任务、最多 18 秒源音频。上游重连或模型结构化输出重试可能增加实际请求数，这不是计费硬上限。失败后保留证据并停止，不自动重试、不点「重新转录」「重新归类」。
 - 以下 PowerShell 示例的 runId 为 `voice-success-20261029`。每次换新 runId；`$S`、`$R`、`$E` 先设为实际路径。单条录音必须是新库里的 id 1，批量文件名固定如下。配方含前置断言，不能在已有任务的库里重复执行。
 
@@ -30,7 +30,7 @@ node "$S/browse.mjs" voice-success-20261029 voice-import "@$F/voice-import.steps
 
 英语只证明英语路径，不能据此宣称中文 ASR 通过。英文验收须复制下面的步骤文件到 `$R`，把关键词「评审」改为 `review`，人工修改标题等中文 UI 文案不用改。音色/系统版本可能改变 MP3 字节，复现以相同文本、语言和媒体参数为准，保留本次音色与哈希用于追踪。
 
-`voice-import.steps.json` 走录音库 → 导入新录音 → 立即扫描 → 录音库 → 详情。它断言 `recording.status=ready`、`hasAudioFile=true`、`transcriptChars=0`、`jobs=[]`，随后通过浏览器原生音频 API 播放并等待 `currentTime>0.25`、`paused=false`、`error=null`，不只验证有 `<audio>` 元素。它不点击 ASR/LLM。
+`voice-import.steps.json` 走录音页 → 页头「导入」→「扫描并导入」→ 关闭对话框 → 录音页 → 详情。它断言 `recording.status=ready`、`hasAudioFile=true`、`transcriptChars=0`、`jobs=[]`，随后通过浏览器原生音频 API 播放并等待 `currentTime>0.25`、`paused=false`、`error=null`，不只验证有 `<audio>` 元素。它不点击 ASR/LLM。
 
 证据在 `$E/voice-import/`：`01-empty`、`02-imported`、`03-playable` 的 PNG/ARIA，完整接口读回和播放状态在 `steps.log`，`console.log` 应为空。另外保存独立响应、媒体和磁盘副作用证据，cleanup 前执行：
 
@@ -45,7 +45,7 @@ Get-FileHash "$R/inbox/REC20261029_150000.mp3","$R/library/2026-10/REC20261029_1
   ConvertTo-Json | Set-Content "$E/voice-import/file-hashes.json"
 ```
 
-预期列表只有一条录音、`durationSec` 约为 5（应用取整）；源文件和归档副本均存在且 SHA-256 相同。本配方不更改「保存路径」。
+预期列表只有一条录音、`durationSec` 约为 5（应用取整）；源文件和归档副本均存在且 SHA-256 相同。本配方不在「设置」里保存目录。
 
 ## 2. 单条转录、全文检索、分段跳播
 
@@ -67,10 +67,10 @@ node "$S/browse.mjs" voice-success-20261029 single-success "@$F/transcribe-succe
 
 同一份 `transcribe-success.steps.json` 接着执行：
 
-1. 从检索结果回详情，点击「AI 归类」，保存 `07-organize-accepted` PNG/ARIA。过渡状态为 `queued_organize` / `analyzing`（归类已排队 / 归类中），终态是 `organized`，UI 叫「已归档」。等待终态上限 120 秒，不能仅凭 toast 判断成功。
+1. 从检索结果回详情，点击「AI 归类」，保存 `07-organize-accepted` PNG/ARIA。过渡状态为 `queued_organize` / `analyzing`（归类已排队 / 归类中），终态是 `organized`，UI 叫「已整理」。等待终态上限 120 秒，不能仅凭 toast 判断成功。
 2. 打开「AI 结论」，读回 `GET /api/recordings/1`，按下表逐项核对；`08-organized` PNG/ARIA 必须包含页面标题、摘要、分类、标签、要点、待办和重要度。模型措辞不做完全相等断言，但这句会议通知应提取会议主题及提前到场事项；字段为空或语义不符均需报告，不重试掩盖。
 3. 点击「编辑标题」，填「人工确认的项目评审」，点「保存标题」，等「标题已更新」。重新 GET 确认 `recording.title` 精确相等、状态仍是 `organized`，原始 `analysis` 不变。保存 `09-edited` PNG/ARIA 与响应。这里验证人工标题入口，不声称其它人工字段入口已验证。
-4. 打开「执行记录 2」，保存 `10-jobs` PNG/ARIA，确认转录、归类各一条成功。数据库表名是 `job_runs`，详情 API 的字段叫 `data.jobs`，没有 `data.job_runs`。本配方不直接写库。
+4. 打开「处理记录 2」，保存 `10-jobs` PNG/ARIA，确认转录、归类各一条成功。数据库表名是 `job_runs`，详情 API 的字段叫 `data.jobs`，没有 `data.job_runs`。本配方不直接写库。
 
 | 验收概念 | 实际读回字段与期望 |
 | --- | --- |
@@ -97,7 +97,7 @@ node "$S/browse.mjs" voice-success-20261029 batch-success "@$F/batch-success.ste
 
 每条命令成功后才执行下一条。脚本扫描新增两条，进入录音库精确勾选这两个文件（不全选已有成功录音），点击「批量转录」，等待「已排队 2 条转录任务」。它不刷新页面、不重新导航，按 `.table__body .row .col-status` 等待两行自动变为「待归类」，而非等待工具栏始终存在的文字。
 
-转录完成后重新勾选这两行，点击「批量归类」，等「已排队 2 条归类任务」，仍在同一页面等三行都成为「已归档」。每阶段最多等 120 秒。`01-selected`、`02-transcribe-accepted`、`03-transcribed`、`04-organize-accepted`、`05-organized` 各保留 PNG/ARIA。
+转录完成后重新勾选这两行，点击「批量归类」，等「已排队 2 条归类任务」，仍在同一页面等三行都成为「已整理」。每阶段最多等 120 秒。`01-selected`、`02-transcribe-accepted`、`03-transcribed`、`04-organize-accepted`、`05-organized` 各保留 PNG/ARIA。
 
 读回 `/api/recordings`，两阶段终态都要求 `hasActiveTasks=false`；分别 GET 两个新 id，转录后要求 `status=transcribed`、`transcriptChars>0`、全文含「评审」、`segments` 非空、转录 job 成功。归类后要求 `status=organized` 及第 3 节字段表的完整断言。脚本保留列表与详情响应于 `steps.log`，人工再按表核对模型语义、分类 slug 和字段一致性，并保存各 id 的 `detail-<id>.json`。
 

@@ -2,9 +2,8 @@ import type { WorkbenchServer } from '../../../sdk/runtime.mjs';
 import { asObject, BadInput, pathParam, reqString } from '../../contracts/input';
 import { importCalendarFile } from '../calendar-import';
 import { generateDayDigest, generateEventDigest } from '../calendar-digest';
-import { calendarRange, calendarRecordings, getCalendarEvent, linkCalendarRecording, listCalendarEvents, parseCalendarInput, recordingSuggestions, saveCalendarEvent } from '../calendar';
+import { calendarRange, calendarRecordings, getCalendarEvent, listCalendarEvents, parseCalendarInput, recordingSuggestions, saveCalendarEvent } from '../calendar';
 import { api } from '../http';
-import { readRecordingDetail } from '../repo';
 
 export function registerCalendarRoutes(app: WorkbenchServer): void {
   app.route('GET', '/api/calendar/events/:id/digest', api((context) => ({
@@ -42,13 +41,4 @@ export function registerCalendarRoutes(app: WorkbenchServer): void {
     return calendarRecordings(context.database, { start, end });
   }));
   app.route('GET', '/api/recordings/:id/calendar-suggestions', api((context) => recordingSuggestions(context.database, pathParam(context.params, 'id'))));
-  app.route('PUT', '/api/recordings/:id', api((context) => {
-    const id = pathParam(context.params, 'id');
-    const value = asObject(context.body).calendar_event_id;
-    if (value !== null && (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0)) {
-      throw new BadInput('calendar_event_id 必须是正整数或 null');
-    }
-    linkCalendarRecording(context.database, id, value);
-    return readRecordingDetail(context.database, id);
-  }));
 }

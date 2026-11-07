@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Starts a fresh, pre-isolated instance. Failed launches retain evidence but stop their child.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -9,8 +9,25 @@ import { DatabaseSync } from 'node:sqlite';
 import { assertIdentity, localOrigin, runPaths, waitStopped } from './run-safety.mjs';
 import { discoverHost, probeHost } from './host.mjs';
 
-export async function launch(root, runId, { readyTimeout = 30000, hostMode = 'none' } = {}) {
+// Fake recorder audio: real MP3 bytes so device-reported sizes match what lands on disk.
+const FAKE_AUDIO = [['REC20261020_103000.mp3', 140], ['REC20261020_143000.mp3', 80], ['REC20261021_090000.mp3', 10]];
+
+function makeFakeAudio(dir) {
+  mkdirSync(dir);
+  const ffmpeg = process.env.FFMPEG ?? 'ffmpeg';
+  for (const [name, seconds] of FAKE_AUDIO) {
+    const made = spawnSync(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', `sine=frequency=440:duration=${seconds}`,
+      '-ac', '1', '-b:a', '128k', join(dir, name)], { stdio: 'pipe', windowsHide: true });
+    if (made.status !== 0) throw new Error(`ffmpeg could not generate fake recorder audio: ${made.stderr}`);
+  }
+}
+
+export async function launch(root, runId, { readyTimeout = 30000, hostMode = 'none', fakeDevice = null } = {}) {
   if (!['none', 'floatboat'].includes(hostMode)) throw new Error('Invalid Host mode');
+  if (fakeDevice !== null && !['wifi', 'ble', 'absent'].includes(fakeDevice)) throw new Error('Invalid fake device mode');
+  // A real recorder switches this computer's Wi-Fi during sync; verification only drives the fake one.
+  const fakeInterpreter = fakeDevice ? process.env.MEMOTALK_TEST_PYTHON : undefined;
+  if (fakeDevice && !fakeInterpreter) throw new Error('--fake-device requires MEMOTALK_TEST_PYTHON (an interpreter with memotalk-sdk)');
   const paths = runPaths(root, runId);
   root = paths.root;
   const { runDir, evidenceDir } = paths;
@@ -30,9 +47,12 @@ export async function launch(root, runId, { readyTimeout = 30000, hostMode = 'no
     library: join(runDir, 'library'), browserProfile: join(runDir, 'browser-profile'),
   };
   for (const dir of Object.values(dirs)) mkdirSync(dir);
+  const fakeAudioDir = fakeDevice ? join(runDir, 'fake-device') : null;
+  if (fakeAudioDir) makeFakeAudio(fakeAudioDir);
   const values = {
     import_dir: dirs.inbox, library_dir: dirs.library,
     auto_connect: '0', auto_pull: '0', auto_transcribe: '0', auto_analyze: '0',
+    ...(fakeInterpreter ? { python_path: resolve(fakeInterpreter) } : {}),
   };
   // The initial migration uses CREATE IF NOT EXISTS and INSERT OR IGNORE for settings.
   // Seed only this table so isolation is effective before any application code runs.
@@ -59,7 +79,10 @@ export async function launch(root, runId, { readyTimeout = 30000, hostMode = 'no
   try {
     log = openSync(logPath, 'wx');
     child = spawn(process.execPath, ['--enable-source-maps', entry], {
-      cwd: root, env: { ...process.env, FLOATBOAT_WORKBENCH_CONFIG: configPath },
+      cwd: root, env: {
+        ...process.env, FLOATBOAT_WORKBENCH_CONFIG: configPath,
+        ...(fakeDevice ? { OPENMINUTES_FAKE_DEVICE: fakeDevice, OPENMINUTES_FAKE_DEVICE_AUDIO_DIR: fakeAudioDir } : {}),
+      },
       detached: true, windowsHide: true, stdio: ['ignore', log, log],
     });
     child.on('error', (error) => { spawnError = error; });
@@ -79,7 +102,7 @@ export async function launch(root, runId, { readyTimeout = 30000, hostMode = 'no
       await new Promise((done) => setTimeout(done, 100));
     }
     if (!url) throw new Error(`Server not ready; see ${logPath}`);
-    const run = { runId, url, pid: child.pid, nonce, root, runDir, evidenceDir, dirs, hostMode, startedAt: new Date().toISOString() };
+    const run = { runId, url, pid: child.pid, nonce, root, runDir, evidenceDir, dirs, hostMode, fakeDevice, startedAt: new Date().toISOString() };
     await assertIdentity(run);
     const response = await fetch(`${url}/api/settings`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
@@ -103,11 +126,13 @@ export async function launch(root, runId, { readyTimeout = 30000, hostMode = 'no
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const args = process.argv.slice(2).filter((arg) => arg !== '--no-host');
-  if (args.length > 1) throw new Error('usage: launch.mjs [runId] [--no-host]');
+  const fakeArg = process.argv.find((arg) => arg.startsWith('--fake-device='));
+  const args = process.argv.slice(2).filter((arg) => arg !== '--no-host' && arg !== fakeArg);
+  if (args.length > 1) throw new Error('usage: launch.mjs [runId] [--no-host] [--fake-device=wifi|ble|absent]');
+  const fakeDevice = fakeArg ? fakeArg.slice('--fake-device='.length) : null;
   const root = resolve(process.env.OPENMINUTES_ROOT ?? resolve(import.meta.dirname, '../../../..'));
   const runId = args[0] ?? `run-${randomUUID()}`;
   const hostMode = process.argv.includes('--no-host') ? 'none' : (process.env.VERIFY_HOST_MODE ?? 'floatboat');
-  const run = await launch(root, runId, { hostMode });
-  console.log(JSON.stringify({ runId, url: run.url, pid: run.pid, runDir: run.runDir, evidenceDir: run.evidenceDir, hostMode }, null, 2));
+  const run = await launch(root, runId, { hostMode, fakeDevice });
+  console.log(JSON.stringify({ runId, url: run.url, pid: run.pid, runDir: run.runDir, evidenceDir: run.evidenceDir, hostMode, fakeDevice }, null, 2));
 }

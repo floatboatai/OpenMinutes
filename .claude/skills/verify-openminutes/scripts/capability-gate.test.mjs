@@ -24,7 +24,7 @@ async function runGate(expression, capabilities) {
     location: { hash: '#/rec/1' },
     fetch: async (url) => {
       calls.push(url);
-      if (url === '/api/device/capabilities') return { ok: true, json: async () => ({ ok: true, data: capabilities }) };
+      if (url === '/api/environment/capabilities') return { ok: true, json: async () => ({ ok: true, data: capabilities }) };
       if (url === '/api/recordings/1') return { ok: true, json: async () => ({ ok: true, data: { recording: { status: 'ready' }, jobs: [] } }) };
       throw new Error(`unexpected request: ${url}`);
     },
@@ -49,7 +49,7 @@ test('partial capabilities fail closed before any paid recording request', async
       error = caught;
     }
     assert.match(error?.message ?? '', /capabilities incomplete/);
-    assert.deepEqual(error.calls, ['/api/device/capabilities']);
+    assert.deepEqual(error.calls, ['/api/environment/capabilities']);
   }
 });
 
@@ -57,8 +57,8 @@ test('complete ASR and LLM capabilities pass the gate before the recording preco
   for (const expression of Object.values(recipes)) {
     const result = await runGate(expression, complete());
     const expected = expression.includes('/api/recordings/1')
-      ? ['/api/device/capabilities', '/api/recordings/1']
-      : ['/api/device/capabilities'];
+      ? ['/api/environment/capabilities', '/api/recordings/1']
+      : ['/api/environment/capabilities'];
     assert.deepEqual(result.calls, expected);
   }
 });

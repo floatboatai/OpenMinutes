@@ -1,30 +1,41 @@
-// ABOUTME: 实时字幕页：启动采集、滚动字幕与收尾归档。
+// ABOUTME: 实时字幕页：开始/停止、滚动字幕，结束后整段录音自动保存。
 
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ArrowRight, Captions, Mic, Square, Waves } from 'lucide-react';
+import { ArrowRight, Captions, Mic, Square, Waves } from 'lucide-react';
 import type { LiveState } from '../../contracts/app';
-import { api, errorText } from '../api';
+import { api } from '../api';
 import { formatBytes, formatClock } from '../format';
 import { useAsyncData, usePolling } from '../useApi';
+import { useDevice } from '../useDevice';
 import { Button, Card, useToast } from '../components/ui';
+import { ErrorNotice } from '../components/ErrorNotice';
 
 interface Props {
   onOpen: (id: number) => void;
-  onNavigate: (route: string) => void;
 }
 
 const STATUS_TEXT: Record<LiveState['status'], string> = {
   idle: '未开始',
   starting: '正在连接录音笔…',
-  listening: '录音中 · 实时回传',
+  listening: '录音中 · 实时转写',
   error: '出现问题',
 };
 
-export function LivePage({ onOpen, onNavigate }: Props) {
+export function LivePage({ onOpen }: Props) {
   const toast = useToast();
   const state = useAsyncData<LiveState>(() => api.get<LiveState>('/api/live'), 'live');
   const [busy, setBusy] = useState(false);
   const captionRef = useRef<HTMLDivElement>(null);
+  const device = useDevice();
+  const deviceState = device.view?.connection.state;
+  const deviceActivity = device.view?.activity ?? null;
+  const deviceBusy = deviceState === 'busy' || Boolean(deviceActivity) || deviceState === 'connecting';
+  // 按真实状态说明为什么暂时不能开始：连接中、清理中、同步中各有各的说法。
+  const deviceBusyText = deviceActivity?.kind === 'cleanup'
+    ? '录音笔正在清理已同步的录音，结束后才能开始实时字幕。'
+    : deviceActivity || deviceState === 'busy'
+      ? '录音笔正在同步，结束后才能开始实时字幕。'
+      : '录音笔正在连接，请稍候。';
 
   const live = state.data;
   const active = Boolean(live?.active);
@@ -44,7 +55,8 @@ export function LivePage({ onOpen, onNavigate }: Props) {
       toast.push('已开始采集，说话即出字幕', 'success');
       state.reload();
     } catch (error) {
-      toast.push(errorText(error), 'error');
+      toast.error(error);
+      state.reload();
     } finally {
       setBusy(false);
     }
@@ -57,7 +69,7 @@ export function LivePage({ onOpen, onNavigate }: Props) {
       toast.push(result.lastSaved ? `已保存，共 ${result.lastSaved.chars} 字` : '已停止', 'success');
       state.reload();
     } catch (error) {
-      toast.push(errorText(error), 'error');
+      toast.error(error);
     } finally {
       setBusy(false);
     }
@@ -71,27 +83,35 @@ export function LivePage({ onOpen, onNavigate }: Props) {
         <div>
           <h1>实时字幕</h1>
           <p className="page__sub">
-            录音笔录音的同时把音频回传到本机，边说边出字。停止后音频与文字一起归档到录音库。
+            录音笔录音的同时把声音传到电脑，边说边出字。停止后录音和文字会一起保存到录音库。
           </p>
         </div>
         <div className="page__actions">
           {active ? (
             <Button variant="danger" icon={<Square size={14} aria-hidden="true" />} disabled={busy} onClick={() => void stop()}>
-              停止并归档
+              停止并保存
             </Button>
           ) : (
-            <Button variant="primary" icon={<Mic size={15} aria-hidden="true" />} disabled={busy} onClick={() => void start()}>
+            <Button variant="primary" icon={<Mic size={15} aria-hidden="true" />} disabled={busy || deviceBusy} onClick={() => void start()}>
               开始实时字幕
             </Button>
           )}
         </div>
       </header>
 
-      {live?.message ? (
-        <div className="alert" role="alert">
-          <AlertTriangle size={14} aria-hidden="true" />
-          <span>{live.message}</span>
-        </div>
+      {deviceBusy && !active ? (
+        <p className="notice" role="status">
+          {deviceBusyText}{' '}
+          <a className="linkbtn" href="#/device">
+            去录音笔查看
+          </a>
+        </p>
+      ) : null}
+      {live?.error ? <ErrorNotice error={live.error} onRetry={active ? undefined : () => void start()} /> : null}
+      {!live?.error && live?.message ? (
+        <p className="notice" role="status">
+          {live.message}
+        </p>
       ) : null}
 
       <Card tight>
@@ -115,7 +135,7 @@ export function LivePage({ onOpen, onNavigate }: Props) {
         <div className={`live__caption${finals.length === 0 && !live?.partial ? ' live__caption--empty' : ''}`} ref={captionRef}>
           {finals.length === 0 && !live?.partial ? (
             <p className="live__hint">
-              {active ? '正在等待第一句话…' : '点右上角「开始实时字幕」，录音笔会自动开始录音并把声音实时传回来。'}
+              {active ? '正在等待第一句话…' : '点右上角「开始实时字幕」，录音笔会开始录音并把声音实时传到电脑。'}
             </p>
           ) : (
             <>
@@ -136,28 +156,21 @@ export function LivePage({ onOpen, onNavigate }: Props) {
       </Card>
 
       {live?.lastSaved ? (
-        <Card title="刚刚归档">
-          <p className="live__saved">
-            已保存到录音库：<code>{live.lastSaved.filePath}</code>（{live.lastSaved.chars} 字）
-          </p>
+        <Card title="刚刚保存">
+          <p className="live__saved">已保存到录音库（{live.lastSaved.chars} 字）。</p>
           <div className="card__actions">
             <Button size="sm" icon={<ArrowRight size={14} aria-hidden="true" />} onClick={() => onOpen(live.lastSaved!.recordingId)}>
               打开这条录音
-            </Button>
-            <Button size="sm" onClick={() => onNavigate('library')}>
-              去录音库
             </Button>
           </div>
         </Card>
       ) : null}
 
-      <Card title="使用前提与限制">
+      <Card title="使用前提">
         <ul className="bullets">
-          <li>录音笔需要先按一下物理键唤醒，并保持在电脑旁边；深度休眠后无法被远程唤醒。</li>
-          <li>实时回传走 BLE 的 0x90 流，设备必须处于录音中；连接中断时这一段音频不会补发。</li>
-          <li>开启实时音频流后，设备不再上报实时音量电平（0xA4 是二选一）。</li>
-          <li>长时间开着会明显耗电。长会议建议录完再拉取（那条链路更稳、更省电）。</li>
-          <li>停止时会自动归档 MP3 与文字；开启「转录后自动归类」还会顺带生成摘要与分类。</li>
+          <li>先按一下录音笔按键唤醒，并放在电脑附近；开始后录音笔会自动录音。</li>
+          <li>实时字幕进行时无法同步录音。</li>
+          <li>结束后整段录音会自动保存到录音库。</li>
         </ul>
       </Card>
     </div>

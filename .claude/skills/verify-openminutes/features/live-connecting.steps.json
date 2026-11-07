@@ -1,0 +1,11 @@
+[
+  {"goto":"#/device"},
+  {"waitText":"录音笔未连接"},
+  {"eval":"(async () => { fetch('/api/device/connect', {method: 'POST', headers: {'content-type': 'application/json', connection: 'close'}, body: '{}'}).catch(() => undefined); await new Promise((r) => setTimeout(r, 50)); location.hash = '#/live'; const started = Date.now(); while (Date.now() - started < 15000) { const text = document.body.innerText; const start = [...document.querySelectorAll('main button')].find((b) => b.innerText.trim() === '开始实时字幕'); if (text.includes('录音笔正在同步')) throw Error('connecting must not be described as syncing'); if (text.includes('录音笔正在连接，请稍候。') && start?.disabled) return { ms: Date.now() - started }; await new Promise((r) => setTimeout(r, 30)); } throw Error('Live page never showed the connecting banner'); })()"},
+  {"screenshot":"01-live-connecting.png"},
+  {"aria":"01-live-connecting.aria.txt"},
+  {"waitNoText":"录音笔正在连接","timeout":60000},
+  {"expectNoText":"录音笔正在同步"},
+  {"eval":"(() => { const start = [...document.querySelectorAll('main button')].find((b) => b.innerText.trim() === '开始实时字幕'); if (!start || start.disabled) throw Error('开始 should be enabled again after the connect attempt'); return 'enabled'; })()"},
+  {"screenshot":"02-live-free.png"}
+]

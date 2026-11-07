@@ -1,6 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { HostClient } from '../../sdk/host.mjs';
 import type { CalendarEvent } from '../contracts/calendar';
+import { AppError } from '../contracts/errors';
+import { networkGate } from './network-gate';
 import { calendarRecordings, getCalendarEvent, listCalendarEvents } from './calendar';
 import { row, strOr, run } from './sql';
 
@@ -41,13 +43,14 @@ async function generateText(host: DigestHost, prompt: string, compact = false): 
     const result = await host.llm.generateText({
       system: SYSTEM, prompt, temperature: 0.2, maxOutputTokens: compact ? 1800 : 6000,
     }, { timeoutMs: 120000 });
-    if (result.finishReason === 'length') throw new Error('LLM 输出被截断，请缩小整理范围后重试');
-    if (!result.text?.trim()) throw new Error('LLM 返回了空内容，请重试');
+    if (result.finishReason === 'length') throw new AppError('LLM_INCOMPLETE', 'AI 整理的内容过长被截断，请缩小整理范围后重试。', 'finishReason=length');
+    if (!result.text?.trim()) throw new AppError('LLM_INCOMPLETE', 'AI 整理返回了空内容，请重试。', `finishReason=${result.finishReason ?? '-'}`);
     return result.text.trim();
   } catch (error) {
+    if (error instanceof AppError) throw error;
     if (error && typeof error === 'object' && 'code' in error &&
         typeof error.code === 'string' && /HOST|CAPABILITY|ACCOUNT|LLM/.test(error.code)) {
-      throw Object.assign(new Error('LLM 不可用，请在 Floatboat 中连接 Host 并配置模型后重试'), { code: error.code });
+      throw new AppError('LLM_UNAVAILABLE', undefined, `${error.code}: ${error instanceof Error ? error.message : String(error)}`);
     }
     throw error;
   }
@@ -64,7 +67,7 @@ async function condense(host: DigestHost, text: string, label: string): Promise<
       ].join('\n'), true));
     }
     const next = parts.join('\n\n');
-    if (next.length >= current.length) throw new Error('LLM 未能压缩长文本，请缩小整理范围后重试');
+    if (next.length >= current.length) throw new AppError('LLM_INCOMPLETE', 'AI 整理未能压缩长文本，请缩小整理范围后重试。');
     current = next;
   }
   if (current.length > 10000) throw new Error('资料过长，请减少关联录音后重试');
@@ -109,6 +112,7 @@ async function exclusive<T>(db: DatabaseSync, key: string, task: () => Promise<T
 }
 
 export function generateEventDigest(db: DatabaseSync, host: DigestHost, id: number): Promise<{ digest: string }> {
+  networkGate.assertOnline();
   return exclusive(db, `event:${id}`, async () => {
     const event = getCalendarEvent(db, id);
     const recordings = digestRecordings(db, { eventId: id });
@@ -123,6 +127,7 @@ export function generateEventDigest(db: DatabaseSync, host: DigestHost, id: numb
 }
 
 export function generateDayDigest(db: DatabaseSync, host: DigestHost, start: string, end: string, day: string): Promise<{ digest: string }> {
+  networkGate.assertOnline();
   return exclusive(db, `day:${day}`, async () => {
     const events = listCalendarEvents(db, new Date(Date.parse(start) - 86400000).toISOString(), new Date(Date.parse(end) + 86400000).toISOString())
       .filter((event) => event.allDay ? event.startTime.slice(0, 10) <= day && event.endTime.slice(0, 10) > day : event.startTime < end && event.endTime > start);

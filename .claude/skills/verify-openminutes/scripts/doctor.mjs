@@ -22,6 +22,8 @@ const run = readRun(root, runId);
 const problems = [];
 const report = { runId, url: run.url, pid: run.pid };
 report.host = { mode: run.hostMode ?? 'none', available: false };
+// Only a fake recorder may be driven: a real one switches this computer's Wi-Fi during sync.
+report.fakeDevice = run.fakeDevice ?? 'none';
 try {
   const config = JSON.parse(readFileSync(join(run.runDir, 'workbench-config.json'), 'utf8'));
   if (config.dataDirectory !== run.dirs.data || config.sourceDirectory !== root
@@ -31,6 +33,10 @@ try {
   if (report.host.mode === 'floatboat') {
     assertHostListener(config.hostConnection);
     Object.assign(report.host, await probeHost(config.hostConnection));
+  } else if (report.host.mode === 'fixture') {
+    // tests/e2e-preflight.mjs 自带的模拟 Host：只允许本机回环地址，不探测、不接触 Floatboat。
+    const hostname = config.hostConnection?.url ? new URL(config.hostConnection.url).hostname : '';
+    if (hostname !== '127.0.0.1' && hostname !== 'localhost') problems.push('HOST_FIXTURE_NOT_LOOPBACK');
   } else if (config.hostConnection) {
     problems.push('HOST_MODE_CONFIG_MISMATCH');
   }

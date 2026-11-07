@@ -1,0 +1,22 @@
+[
+  {"goto":"#/library"},
+  {"waitText":"还没有录音"},
+  {"eval":"(() => { const link = [...document.querySelectorAll('main a')].find((a) => a.innerText.trim() === '录音笔'); if (!link || link.getAttribute('href') !== '#/device') throw Error('Empty state must link to the device page'); const actionButtons = [...document.querySelectorAll('main .empty button')]; if (actionButtons.length) throw Error('Empty state must not offer action buttons: ' + actionButtons.map((b) => b.innerText).join(',')); return 'ok'; })()"},
+  {"screenshot":"01-empty.png"},
+  {"aria":"01-empty.aria.txt"},
+  {"click":"text=导入"},
+  {"waitText":"扫描并导入"},
+  {"waitText":"个音频文件"},
+  {"expectText":"在设置中修改目录"},
+  {"screenshot":"02-dialog.png"},
+  {"aria":"02-dialog.aria.txt"},
+  {"click":"text=扫描并导入"},
+  {"waitText":"已导入 1 条","timeout":20000},
+  {"eval":"(() => { if (location.hash !== '#/library') throw Error('Import must stay on #/library, got ' + location.hash); return location.hash; })()"},
+  {"click":"text=关闭"},
+  {"waitText":"当前显示 1 条"},
+  {"eval":"(() => { if (location.hash !== '#/library') throw Error('Import must stay on #/library, got ' + location.hash); return location.hash; })()"},
+  {"eval":"(async () => { const r = await fetch('/api/recordings', {headers: {connection: 'close'}}); const body = await r.json(); if (body.data.items.length !== 1 || body.data.items[0].status !== 'ready') throw Error('Unexpected library: ' + JSON.stringify(body.data.items)); return body.data.items.map((item) => ({ id: item.id, filename: item.filename, status: item.status })); })()"},
+  {"screenshot":"03-imported.png"},
+  {"aria":"03-imported.aria.txt"}
+]

@@ -1,15 +1,16 @@
-// ABOUTME: 分类管理：新增、改名、改色、删除自定义分类。
+// ABOUTME: 分类页：分类增删改，以及每个分类的录音条数与总时长。
 
 import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import type { Category } from '../../contracts/app';
-import { api, errorText } from '../api';
+import type { Category, Overview } from '../../contracts/app';
+import { api } from '../api';
+import { formatDuration } from '../format';
 import { useAsyncData } from '../useApi';
 import { Button, Card, Empty, ErrorState, Field, Loading, useToast } from '../components/ui';
 
 const PALETTE = ['#2563eb', '#7c3aed', '#d97706', '#dc2626', '#0891b2', '#be185d', '#059669', '#475569'];
 
-export function CategoriesPage() {
+export function CategoriesPage({ overview, onChanged }: { overview: Overview | null; onChanged: () => void }) {
   const toast = useToast();
   const state = useAsyncData<Category[]>(() => api.get<Category[]>('/api/categories'), 'categories');
   const [name, setName] = useState('');
@@ -19,6 +20,7 @@ export function CategoriesPage() {
 
   const categories = state.data ?? [];
   const total = categories.reduce((sum, item) => sum + item.recordingCount, 0);
+  const durations = new Map((overview?.byCategory ?? []).map((item) => [item.id, item.durationSec]));
 
   const add = async () => {
     if (!name.trim()) return;
@@ -30,7 +32,7 @@ export function CategoriesPage() {
       toast.push('分类已创建', 'success');
       state.reload();
     } catch (error) {
-      toast.push(errorText(error), 'error');
+      toast.error(error);
     } finally {
       setBusy(false);
     }
@@ -43,7 +45,7 @@ export function CategoriesPage() {
       toast.push('分类已更新', 'success');
       state.reload();
     } catch (error) {
-      toast.push(errorText(error), 'error');
+      toast.error(error);
     }
   };
 
@@ -52,7 +54,7 @@ export function CategoriesPage() {
       await api.patch(`/api/categories/${category.id}`, { color: nextColor });
       state.reload();
     } catch (error) {
-      toast.push(errorText(error), 'error');
+      toast.error(error);
     }
   };
 
@@ -62,19 +64,20 @@ export function CategoriesPage() {
       await api.remove(`/api/categories/${category.id}`);
       toast.push('分类已删除', 'success');
       state.reload();
+      onChanged();
     } catch (error) {
-      toast.push(errorText(error), 'error');
+      toast.error(error);
     }
   };
 
   if (state.loading && !state.data) return <Loading label="正在读取分类" />;
-  if (state.error) return <ErrorState message={state.error} onRetry={state.reload} />;
+  if (state.error) return <ErrorState error={state.error} onRetry={state.reload} />;
 
   return (
     <div className="page page--categories">
       <header className="page__head">
         <div>
-          <h1>分类体系</h1>
+          <h1>分类</h1>
           <p className="page__sub">
             共 {categories.length} 个分类，覆盖 {total} 条录音。AI 归类时会从这些分类中选择最贴切的一个。
           </p>
@@ -132,7 +135,10 @@ export function CategoriesPage() {
                     aria-label={`${category.name} 的名称`}
                   />
                   <span className="catlist__desc">{category.description ?? '—'}</span>
-                  <span className="catlist__count">{category.recordingCount} 条</span>
+                  <span className="catlist__count">
+                    {category.recordingCount} 条
+                    {durations.get(category.id) ? <span className="muted"> · {formatDuration(durations.get(category.id))}</span> : null}
+                  </span>
                   {category.isSystem ? (
                     <span className="muted catlist__lock">内置</span>
                   ) : (

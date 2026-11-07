@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { AppError } from '../contracts/errors';
 import type { HostClient } from '../../sdk/host-contracts.mjs';
 import type { PreflightReport, RepairState } from '../contracts/preflight';
 import { hostChecks } from './preflight';
 import type { RepairStore } from './repair-store';
+import type { NetworkGate } from './network-gate';
 
 export function repairPrompt(report: PreflightReport, workingDirectory: string): string {
   return [
@@ -27,6 +29,8 @@ export function createEnvironmentRepair(options: {
   workingDirectory: string;
   store: RepairStore;
   pollMs?: number;
+  /** 录音笔无线快传期间电脑断开外网，修复请求快速失败。 */
+  gate?: Pick<NetworkGate, 'assertOnline'>;
 }) {
   let state = options.store.load();
   let pending: Promise<RepairState> | null = null;
@@ -55,7 +59,7 @@ export function createEnvironmentRepair(options: {
         ? await options.host.agent.get({ runId: current.runId })
         : await options.host.agent.findByIdempotencyKey({ idempotencyKey: current.idempotencyKey });
       if (disposed) return;
-      if (!run) throw new Error('Host 暂未找到任务，不能据此确认提交未执行');
+      if (!run) throw new AppError('REPAIR_NOT_FOUND', '修复任务暂时找不到，请重试', `runId=${current.runId ?? '-'} idempotencyKey=${current.idempotencyKey}`);
       if (run.status === 'running' || run.status === 'cancelling') {
         save({ ...current, runId: run.runId, status: 'running', text: run.text || `已恢复 Host 任务：${run.status}` });
         schedule();
@@ -71,17 +75,21 @@ export function createEnvironmentRepair(options: {
       }
     } catch (error) {
       if (disposed) return;
-      state = { ...current, status: 'unknown', text: `提交结果未知，禁止重复提交。正在恢复任务 ${current.idempotencyKey}：${String(error)}` };
+      state = { ...current, status: 'unknown', text: `提交结果未知，禁止重复提交，正在恢复修复任务。
+${String(error)}` };
       try { options.store.save(state); } catch { /* The prior durable intent still blocks after restart. */ }
       schedule();
     }
   }
   async function begin(): Promise<RepairState> {
     if (active(state)) return state;
+    options.gate?.assertOnline();
     const report = await options.report();
     const agent = (await hostChecks(options.host)).find((item) => item.id === 'host-agent');
-    if (agent?.status !== 'ok') throw new Error(agent?.reason ?? 'agent 不可用');
-    if (!report.items.some((item) => item.status === 'fail' && item.autoRepair)) throw new Error('没有可自动修复的失败项');
+    if (agent?.status !== 'ok') {
+      throw new AppError('HOST_AGENT_UNAVAILABLE', 'Floatboat 助手暂不可用', `agent 不可用：${agent?.detail ?? agent?.reason ?? 'unknown'}`);
+    }
+    if (!report.items.some((item) => item.status === 'fail' && item.autoRepair)) throw new AppError('NOTHING_TO_REPAIR', '没有可自动修复的失败项');
     const idempotencyKey = `openminutes-preflight-${randomUUID()}`;
     if (disposed) return state;
     save({ status: 'starting', idempotencyKey, runId: null, text: '已保存提交意图，正在请求 Floatboat 助手。' });

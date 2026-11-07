@@ -1,12 +1,13 @@
-// ABOUTME: SDK 指令库表格，只读展示 memotalk-sdk 的协议指令。
+// ABOUTME: 设备协议指令参考表（开发者），只读展示设备 SDK（memotalk-sdk）的协议指令；只在诊断区出现。
 
 import { Activity } from 'lucide-react';
 import type { SdkCommand } from '../../contracts/app';
-import { Card, Empty } from './ui';
+import { Empty } from './ui';
 
 export function SdkCommandTable({ commands }: { commands: SdkCommand[] }) {
   return (
-    <Card title="SDK 指令库" action={<span className="muted">{commands.length} 条 · 来自 memotalk-sdk</span>}>
+    <div className="cmdtable-wrap">
+      <p className="muted">{commands.length} 条 · 来自设备 SDK（memotalk-sdk）</p>
       {commands.length === 0 ? (
         <Empty title="没有指令数据" />
       ) : (
@@ -37,8 +38,8 @@ export function SdkCommandTable({ commands }: { commands: SdkCommand[] }) {
         </div>
       )}
       <p className="muted cmdtable__foot">
-        <Activity size={13} aria-hidden="true" /> 指令定义来自 SDK 协议文档；本应用只自动执行「读取清单」与「下载文件」两条安全流程。
+        <Activity size={13} aria-hidden="true" /> 本应用只自动执行连接、读取状态与清单、校时、下载，以及删除已同步且校验一致的录音。
       </p>
-    </Card>
+    </div>
   );
 }

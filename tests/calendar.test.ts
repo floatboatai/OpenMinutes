@@ -158,7 +158,7 @@ test('standalone Host reports LLM unavailable without storing a fake digest', as
   using db = database();
   const event = importCalendarFile(db, fixture, 'sample.ics').events[0];
   db.prepare("INSERT INTO recordings(filename,dedupe_key,calendar_event_id) VALUES ('a','a',?)").run(event.id);
-  await assert.rejects(() => generateEventDigest(db, createHostClient(null), event.id), /LLM 不可用/);
+  await assert.rejects(() => generateEventDigest(db, createHostClient(null), event.id), /AI 整理暂不可用/);
   assert.equal(getCalendarEvent(db, event.id).digest, null);
 });
 

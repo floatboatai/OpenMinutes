@@ -5,7 +5,10 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import type { ImportDirectoryState, IngestScanResult, ParsedDeviceFile } from '../contracts/app';
+import type { ImportDirectoryState, IngestScanResult } from '../contracts/app';
+import type { ParsedDeviceFile } from '../contracts/device';
+import { AppError } from '../contracts/errors';
+import { toFailure } from './http';
 import { fileSize, probeDurationSec } from './media';
 import { nowIso, num, row, run, str, strOr, touchRecording, writeSetting } from './sql';
 import { ensureMonthDir, expandHome, resolveStoredPath } from './library';
@@ -103,7 +106,7 @@ export interface ImportOneInput {
   source: 'folder_import' | 'device_pull';
 }
 
-export type ImportOutcome = { outcome: 'imported'; id: number } | { outcome: 'skipped'; reason: string } | { outcome: 'failed'; reason: string };
+export type ImportOutcome = { outcome: 'imported'; id: number } | { outcome: 'skipped'; reason: string } | { outcome: 'failed'; reason: string; detail?: string };
 
 /** 复制单个音频文件并登记；重复文件按 dedupe_key 跳过而不是覆盖。 */
 export async function importAudioFile(input: ImportOneInput): Promise<ImportOutcome> {
@@ -130,7 +133,8 @@ export async function importAudioFile(input: ImportOneInput): Promise<ImportOutc
     ).lastId;
     return { outcome: 'imported', id };
   } catch (error) {
-    return { outcome: 'failed', reason: error instanceof Error ? error.message : '写入失败' };
+    const failure = toFailure(error);
+    return { outcome: 'failed', reason: failure.error, detail: failure.detail ?? (error instanceof Error ? error.message : String(error)) };
   }
 }
 
@@ -178,7 +182,7 @@ export async function scanImportDirectory(
       result.files.push({ filename: entry.name, outcome: 'skipped', reason: outcome.reason });
     } else {
       result.failed += 1;
-      result.files.push({ filename: entry.name, outcome: 'failed', reason: outcome.reason });
+      result.files.push({ filename: entry.name, outcome: 'failed', reason: outcome.reason, ...(outcome.detail ? { detail: outcome.detail } : {}) });
     }
   }
   return result;
@@ -314,7 +318,9 @@ export async function ensureImportDir(directory: string): Promise<boolean> {
     return true;
   } catch (error) {
     const detail = error instanceof Error ? error.message : '未知错误';
-    throw new IngestError('DIR_NOT_CREATABLE', `无法创建导入目录：${directory}（${detail}）`);
+    const failure = toFailure(error);
+    throw new AppError(failure.code === 'INTERNAL_ERROR' ? 'DIR_NOT_CREATABLE' : failure.code,
+      failure.code === 'INTERNAL_ERROR' ? '无法创建导入目录，请在设置里换一个文件夹。' : failure.error, `${directory}: ${detail}`, failure.action);
   }
 }
 

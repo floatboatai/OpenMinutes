@@ -14,7 +14,7 @@ description: 在本机隔离启动 OpenMinutes，用无头 Chrome/Edge 验证导
 - **默认复用桌面 Floatboat 的 Host，不另起 Host。** launch 检查 Floatboat 进程、本 appId 最新连接配置、监听端口的进程归属，以及只读 `capabilities.list`。任一步失败便停止，不自动降级；显式 `--no-host` 或 `VERIFY_HOST_MODE=none` 才禁用 Host。
 - **Host 地址属于本机敏感信息。** 只从 `%APPDATA%/floatboat/workbench/connections/*.json` 读取连接配置，只复制 `hostConnection.url` 到本 run 的 `workbench-config.json`。不复制真实数据目录、端口或其它启动字段；不打印地址、不把配置放入证据、不提交它。cleanup 删除临时配置。
 - **真实 ASR/LLM 消耗额度。** 使用 `speech.mjs` 的短语音，每条只点一次转录/归类；失败后先读证据，不盲目重跑配方。`evidence.mjs` 从隔离库统计 `asr.start` 和 `llm.*`，包含自动重试/回退。能力探测不发起计费调用，也不能证明上游模型一定可用。实时字幕/BLE 不在本配方覆盖范围。
-- **BLE 设备不要碰。** 设备页的「连接并检测」「读取清单」「下载」会通过本机 Python + bleak 真正连无线电。launch 已关闭 `auto_connect` / `auto_pull`，驱动时也不要点这几个按钮。
+- **真实录音笔不要碰。** 录音笔页的「连接」「同步录音」「断开连接」「清理已同步的录音」以及列表里的「同步」会通过本机 Python + bleak 真正连无线电；同步大录音还会**真实切换本机 Wi-Fi**（连上录音笔热点、断开外网），清理会删除录音笔上的文件。**禁止对真实录音笔执行同步**，e2e 只用 `--fake-device`。launch 已关闭 `auto_connect` / `auto_pull`；没有 `--fake-device` 时驱动也不要点这些按钮。真机验收交给用户按清单执行。
 - **不要驱动不是本次 run 启动的实例。** 用户的 Floatboat 里可能开着同一个应用（数据在 `%APPDATA%\floatboat\workbench\data\workbench.3bb3830b-…`），那是真实数据，绝不读写、绝不 kill。
 - 多个 run 可以并行：端口随机、数据目录 / 收件目录 / 归档目录 / 浏览器 profile 都按 runId 隔离。
 
@@ -24,7 +24,10 @@ description: 在本机隔离启动 OpenMinutes，用无头 Chrome/Edge 验证导
 node .claude/skills/verify-openminutes/scripts/build.mjs          # ~10s；严格类型检查 + 打包到 dist/，失败时打印诊断并 exit 1
 node .claude/skills/verify-openminutes/scripts/launch.mjs <runId>  # runId 省略则生成 UUID
 node .claude/skills/verify-openminutes/scripts/launch.mjs <runId> --no-host  # 显式验证无 Host 失败路径
+MEMOTALK_TEST_PYTHON=<装了 memotalk-sdk 的解释器> node .claude/skills/verify-openminutes/scripts/launch.mjs <runId> --no-host --fake-device=wifi  # 假录音笔：wifi | ble | absent
 ```
+
+- `--fake-device=<wifi|ble|absent>` 设置 `OPENMINUTES_FAKE_DEVICE`，把 `python_path` 写成 `MEMOTALK_TEST_PYTHON`（缺少时报错退出），并用 ffmpeg 在 `$R/fake-device/` 生成 3 段真实 mp3（约 2.1 MiB、1.2 MiB、160 KiB）作为录音笔里的文件。`wifi` 走无线快传（内存 FTP），`ble` 模拟入网失败以验证「已改用蓝牙」，`absent` 模拟找不到录音笔。假设备 prelude 会让任何 `netsh` / `nmcli` / `networksetup` 调用直接抛错，保证不改动本机网络。模式写进 `run.json`，doctor 会输出当前模式。
 
 - 要验收另一个 worktree 或分支的代码时，给每条命令都加上 `OPENMINUTES_ROOT=<那个 checkout 的绝对路径>`。build、run 目录和证据都会落在那个 checkout 里，不需要往它里面复制 skill。
 - 每次使用全新 runId；即使 cleanup 已执行，旧证据目录仍然保留，launch 会拒绝复用该 id，防止读取旧日志的 ready 地址或混合不同运行的证据。
@@ -42,7 +45,7 @@ node .claude/skills/verify-openminutes/scripts/launch.mjs <runId> --no-host  # �
 node .claude/skills/verify-openminutes/scripts/doctor.mjs <runId>
 ```
 
-只读检查，exit 0 才能继续驱动。它用 run 的 nonce 请求 `/__workbench/health`，确认端口上的进程就是本 run 启动的（pid、generation 一致）；确认隔离设置仍然生效（导入/归档目录指向本 run，四个 auto 开关为 `0`）；确认 `dist/` 不比 `src/` 旧。任何异常（页面空白、接口 404、数据对不上）都先跑它。如果报告设置被改，说明刚才的操作（例如设备页「保存路径」）覆盖了隔离，这个 run 应该 cleanup 后重来。
+只读检查，exit 0 才能继续驱动。它用 run 的 nonce 请求 `/__workbench/health`，确认端口上的进程就是本 run 启动的（pid、generation 一致）；确认隔离设置仍然生效（导入/归档目录指向本 run，四个 auto 开关为 `0`）；确认 `dist/` 不比 `src/` 旧。任何异常（页面空白、接口 404、数据对不上）都先跑它。如果报告设置被改，说明刚才的操作（例如在「设置 › 通用」里保存了目录）覆盖了隔离，这个 run 应该 cleanup 后重来。
 
 Host 模式另检查 Floatboat 监听归属，并发送一次 `capabilities.list`。输出 `host: {mode, available, probe}`，不输出连接地址或能力响应原文；显式无 Host 模式显示 `mode: "none", available: false`，不调用 Host。Floatboat 重启后旧地址可能失效，此时 cleanup 后重新 launch。
 
@@ -55,15 +58,17 @@ node .claude/skills/verify-openminutes/scripts/browse.mjs <runId> <label> '<step
 node .claude/skills/verify-openminutes/scripts/browse.mjs <runId> <label> @steps.json
 ```
 
-步骤与选择器的完整说明写在脚本头部注释里。选择器优先用 `aria=<aria-label>`（例如 `aria=搜索录音`），其次 `text=<完整可见文字>`（例如 `text=立即扫描`），最后才用 CSS（例如 `button.row__main`）。任何一步失败都会打印 `FAIL …` 并以 exit 1 结束，`steps.log` 里保留已完成的步骤。步骤里如果有 `eval`，并且 JS 中含有引号，请先把步骤写进 JSON 文件，再用 `@file` 传入；在 shell 单引号里多层转义很容易写坏，表现为 `SyntaxError: Invalid or unexpected token`。
+步骤与选择器的完整说明写在脚本头部注释里。选择器优先用 `aria=<aria-label>`（例如 `aria=搜索录音`），其次 `text=<完整可见文字>`（例如 `text=扫描并导入`），最后才用 CSS（例如 `button.row__main`）。任何一步失败都会打印 `FAIL …` 并以 exit 1 结束，`steps.log` 里保留已完成的步骤。步骤里如果有 `eval`，并且 JS 中含有引号，请先把步骤写进 JSON 文件，再用 `@file` 传入；在 shell 单引号里多层转义很容易写坏，表现为 `SyntaxError: Invalid or unexpected token`。
 
 示例：打开录音库并进入第一条录音的详情。
 
 ```bash
-node .claude/skills/verify-openminutes/scripts/browse.mjs <runId> open-detail '[{"goto":"#/library"},{"waitFor":"button.row__main"},{"click":"button.row__main"},{"waitText":"返回录音库"},{"eval":"location.hash"},{"screenshot":"detail.png"},{"aria":"detail.aria.txt"}]'
+node .claude/skills/verify-openminutes/scripts/browse.mjs <runId> open-detail '[{"goto":"#/library"},{"waitFor":"button.row__main"},{"click":"button.row__main"},{"waitText":"返回录音"},{"eval":"location.hash"},{"screenshot":"detail.png"},{"aria":"detail.aria.txt"}]'
 ```
 
-页面路由：`#/overview`、`#/library`、`#/rec/<id>`、`#/live`、`#/device`、`#/categories`、`#/settings`。侧边导航是 `navigation "主导航"` 下的按钮（概览 / 录音库 / 实时字幕 / 设备接入 / 分类 / 设置）。
+页面路由：`#/library`（默认，可带 `?stage=failed|ready|transcribed|pending`）、`#/rec/<id>`、`#/device`、`#/live`、`#/calendar`（可带 `?day=YYYY-MM-DD&rec=<id>`）、`#/categories`、`#/settings`、`#/settings/diagnostics`。`#/overview` 和未知哈希会被改写为 `#/library`。侧边导航是 `navigation "主导航"` 下的 6 个按钮：录音 / 录音笔 / 实时字幕 / 日历 / 分类 / 设置，每页 `<h1>` 与导航标签一致。详情页的返回按钮文字随来源变化（「返回录音」「返回日历」）。
+
+入口速查（每个功能只有一个入口）：导入本地文件夹在录音页头「导入」→「扫描并导入」；连接、同步录音、断开连接、清理已同步的录音、停止只在录音笔页；录音与日程的关联只在日历页；本机环境、Python/ffmpeg 路径、传输方式、最近设备操作、设备协议指令参考、手动登记清单只在「设置 › 诊断与高级」（`#/settings/diagnostics`，自动展开 `details#diagnostics`）。错误主行是中文结论，技术原文要点「查看详情」才出现。
 
 **接口**：直接用 curl 打 `run.json` 里的 url，不需要鉴权。响应格式是 `{ ok, data | error }`。
 
@@ -115,7 +120,7 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='ch
 | 脚本 | 作用 |
 | --- | --- |
 | `scripts/build.mjs` | 用 Floatboat 编译器构建 `dist/` |
-| `scripts/launch.mjs [runId]` | 启动隔离实例，并写入 `run.json` |
+| `scripts/launch.mjs [runId] [--no-host] [--fake-device=wifi\|ble\|absent]` | 启动隔离实例（可选假录音笔），并写入 `run.json` |
 | `scripts/doctor.mjs <runId>` | 只读体检，exit 0 才可以继续驱动 |
 | `scripts/browse.mjs <runId> <label> <steps>` | 无头浏览器驱动页面，并留存证据 |
 | `scripts/cleanup.mjs <runId>` | 停掉本 run 的进程并删除 scratch，保留证据 |

@@ -23,7 +23,7 @@ test('unavailable agent cannot submit a task', async (t) => {
   const repair = createEnvironmentRepair({
     host: createHostClient(undefined), report: async () => report, workingDirectory: '/app', store: testStore(t),
   });
-  await assert.rejects(repair.start(), /agent 不可用/);
+  await assert.rejects(repair.start(), /Floatboat 助手暂不可用/);
   assert.equal(repair.get().status, 'idle');
   repair.dispose();
 });

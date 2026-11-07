@@ -342,8 +342,9 @@ export async function transcribeAudioFile(host: HostClient, options: TranscribeO
     .join('')
     .trim();
   if (!text) {
-    const reason = lastAsrError ? `识别接口返回错误：${lastAsrError}` : '没有识别到可用的语音内容';
-    throw new TranscribeError('ASR_EMPTY', reason, trace);
+    // 识别接口报过错：原文只进详情，主文案由 describeError 按 ASR_UNSTABLE 给出。
+    if (lastAsrError) throw new TranscribeError('ASR_UNSTABLE', `识别接口返回错误：${lastAsrError}`, trace);
+    throw new TranscribeError('ASR_EMPTY', '没有识别到可用的语音内容', trace);
   }
 
   const audioMs = Math.round((decodedBytes / PCM_BYTES_PER_SECOND) * 1000);

@@ -1,4 +1,4 @@
-// ABOUTME: 详情页的展示型片段：转录分段、AI 结论、执行记录与元数据。
+// ABOUTME: 详情页的展示型片段：转录分段、AI 结论、处理记录与元数据。
 
 import type { AnalysisRecord, JobRun, RecordingSummary, TranscriptSegment } from '../../contracts/app';
 import { formatDateTime, formatMs } from '../format';
@@ -101,7 +101,7 @@ export function AnalysisView({ analysis }: { analysis: AnalysisRecord }) {
 }
 
 const JOB_STATUS: Record<string, string> = {
-  running: '执行中',
+  running: '进行中',
   success: '成功',
   failure: '失败',
   interrupted: '中断',
@@ -124,8 +124,8 @@ export function JobsTable({ jobs }: { jobs: JobRun[] }) {
 
 const SOURCE_LABEL: Record<string, string> = {
   folder_import: '目录导入',
-  device_manifest: '设备清单',
-  device_pull: '设备拉取',
+  device_manifest: '录音笔（未同步）',
+  device_pull: '录音笔同步',
   manual: '手动登记',
   live_caption: '实时字幕',
 };
@@ -138,8 +138,8 @@ export function MetaList({ recording, storagePath }: { recording: RecordingSumma
         <dd>{SOURCE_LABEL[recording.source] ?? recording.source}</dd>
       </div>
       <div>
-        <dt>设备</dt>
-        <dd>{recording.deviceSerial ?? '未关联设备'}</dd>
+        <dt>录音笔</dt>
+        <dd>{recording.deviceSerial ?? '—'}</dd>
       </div>
       <div>
         <dt>入库时间</dt>

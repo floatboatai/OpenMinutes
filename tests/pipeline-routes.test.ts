@@ -35,7 +35,9 @@ test('HTTP enqueue exposes waiting tasks, rejects duplicates, and publishes term
         (1, 'one.mp3', 'one', 'one.mp3', 'ready', 'text'),
         (2, 'two.mp3', 'two', 'two.mp3', 'transcribed', 'text'),
         (3, 'three.mp3', 'three', 'three.mp3', 'ready', 'text'),
-        (4, 'four.mp3', 'four', 'four.mp3', 'transcribed', 'text');
+        (4, 'four.mp3', 'four', 'four.mp3', 'transcribed', 'text'),
+        (5, 'five.mp3', 'five', 'five.mp3', 'ready', 'text'),
+        (6, 'six.mp3', 'six', NULL, 'pending', NULL);
     `);
     const { url } = await app.listen();
     const get = async (route: string) => (await fetch(`${url}${route}`)).json();
@@ -56,17 +58,24 @@ test('HTTP enqueue exposes waiting tasks, rejects duplicates, and publishes term
       { accepted: 1, skipped: 2, ids: [3] });
     assert.deepEqual((await post('/api/recordings/batch/organize', { ids: [1, 2, 4] })).data,
       { accepted: 1, skipped: 2, ids: [4] });
+    // The {stage} form selects every recording at that stage on the server; queued ones are skipped.
+    assert.deepEqual((await post('/api/recordings/batch/transcribe', { stage: 'ready' })).data,
+      { accepted: 1, skipped: 2, ids: [5] });
+    assert.deepEqual((await post('/api/recordings/batch/organize', { stage: 'transcribed' })).data,
+      { accepted: 0, skipped: 2, ids: [] });
+    assert.equal((await post('/api/recordings/batch/organize', { stage: 'ready' })).code, 'INVALID_INPUT');
+    assert.equal((await post('/api/recordings/batch/transcribe', { stage: 'pending' })).code, 'INVALID_INPUT');
     const list = (await get('/api/recordings?stage=failed&limit=1')).data;
     assert.equal(list.items.length, 0);
     assert.equal(list.hasActiveTasks, true);
 
     // Exercise the real pipeline's preflight failure without requiring ffmpeg or audio.
-    app.database.exec('UPDATE recordings SET storage_path = NULL WHERE id IN (1, 3)');
+    app.database.exec('UPDATE recordings SET storage_path = NULL WHERE id IN (1, 3, 5)');
     enqueue('test:drain', async () => drained.resolve());
     drainQueued = true;
     blocker.resolve();
     await drained.promise;
-    for (const id of [1, 3]) {
+    for (const id of [1, 3, 5]) {
       const detail = (await get(`/api/recordings/${id}`)).data;
       assert.equal(detail.recording.status, 'failed');
       assert.match(detail.lastError, /音频文件/);
@@ -74,7 +83,10 @@ test('HTTP enqueue exposes waiting tasks, rejects duplicates, and publishes term
     for (const id of [2, 4]) {
       const detail = (await get(`/api/recordings/${id}`)).data;
       assert.equal(detail.recording.status, 'transcribed');
-      assert.match(detail.lastError, /HOST_NOT_CONNECTED/);
+      // The headline is Chinese; the Host code only appears in the detail layer.
+      assert.doesNotMatch(detail.lastError, /HOST_NOT_CONNECTED/);
+      assert.equal(detail.lastErrorCode, 'LLM_UNAVAILABLE');
+      assert.match(detail.lastErrorDetail, /HOST_NOT_CONNECTED/);
       assert.equal(detail.jobs[0].status, 'failure');
     }
     assert.equal((await get('/api/recordings')).data.hasActiveTasks, false);

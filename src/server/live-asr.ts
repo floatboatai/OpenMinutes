@@ -13,8 +13,23 @@ export interface AsrBridgeState {
   restarts: number;
   pcmBytes: number;
   message: string | null;
+  /** 宿主错误码与原文，只在「查看详情」里显示；保留最近 4 KB。 */
+  detail?: string;
   partial: string;
   finals: string[];
+}
+
+const RECONNECTING = '识别连接中断，正在重连…';
+
+export function appendDetail(rt: { detail?: string }, text: string): void {
+  rt.detail = `${rt.detail ?? ''}${text}
+`.slice(-4096);
+}
+
+function errorText(error: unknown): string {
+  if (error === null || typeof error !== 'object') return String(error);
+  const record = error as Record<string, unknown>;
+  return [record.code, record.message].filter((part) => typeof part === 'string' && part).join(': ') || String(error);
 }
 
 function isSessionGone(error: unknown): boolean {
@@ -34,7 +49,10 @@ function consumeEvents(rt: AsrBridgeState, streamId: string): Promise<void> {
         if (event.type === 'done') break;
         if (event.type === 'result') {
           const status = event.session.status;
-          if (event.session.errorCode) rt.message = event.session.errorCode;
+          if (event.session.errorCode) {
+            rt.message = RECONNECTING;
+            appendDetail(rt, `session ${event.session.status}: ${event.session.errorCode}`);
+          }
           if (status === 'cancelled' || status === 'failed' || status === 'completed') {
             const text = event.session.text.trim();
             if (text && rt.finals.length === firstFinal) rt.finals.push(text);
@@ -45,9 +63,8 @@ function consumeEvents(rt: AsrBridgeState, streamId: string): Promise<void> {
         }
         const progress = event.event;
         if (progress.type === 'error') {
-          rt.message = progress.errorCode
-            ? `识别服务异常（${progress.errorCode}），正在重连…`
-            : '识别服务异常，正在重连…';
+          rt.message = RECONNECTING;
+          if (progress.errorCode) appendDetail(rt, `event error: ${progress.errorCode}`);
           rt.streamId = null;
           rt.seq = 0;
           continue;
@@ -82,7 +99,8 @@ async function ensureStream(rt: AsrBridgeState): Promise<boolean> {
     rt.eventsDone = consumeEvents(rt, started.streamId);
     return true;
   } catch (error) {
-    rt.message = `识别服务启动失败：${error instanceof Error ? error.message : '未知错误'}`;
+    rt.message = '语音识别暂时不可用，请确认已在 Floatboat 登录并开启语音识别。';
+    appendDetail(rt, `asr.start: ${errorText(error)}`);
     return false;
   }
 }
@@ -115,7 +133,8 @@ async function drainFrames(rt: AsrBridgeState): Promise<void> {
     } catch (error) {
       rt.queue.shift();
       if (!isSessionGone(error)) {
-        rt.message = error instanceof Error ? error.message : '识别推流中断';
+        rt.message = RECONNECTING;
+        appendDetail(rt, `asr.sendFrame: ${errorText(error)}`);
         continue;
       }
       // 会话被回收/上游异常：丢掉旧 streamId，下一帧自动重建。
@@ -123,7 +142,7 @@ async function drainFrames(rt: AsrBridgeState): Promise<void> {
       rt.seq = 0;
       rt.restarts += 1;
       if (rt.restarts > 4) {
-        rt.message = '识别服务连续失败，请点「停止并归档」后重新开始';
+        rt.message = '识别服务连续失败，请点「停止并保存」后重新开始';
         break;
       }
       rt.message = '识别会话已重置，正在自动重连…';
@@ -139,9 +158,13 @@ export async function finishLiveAsr(rt: AsrBridgeState): Promise<string> {
     try {
       const final = await rt.app.host.asr.stop({ streamId: rt.streamId });
       fallback = final.text.trim();
-      if (final.errorCode) rt.message = final.errorCode;
+      if (final.errorCode) {
+        rt.message = '识别收尾没有完成，已识别的字幕不受影响。';
+        appendDetail(rt, `asr.stop: ${final.errorCode}`);
+      }
     } catch (error) {
-      rt.message = `识别收尾失败：${error instanceof Error ? error.message : '未知错误'}`;
+      rt.message = '识别收尾没有完成，已识别的字幕不受影响。';
+      appendDetail(rt, `asr.stop: ${errorText(error)}`);
     }
   }
   if (rt.eventsDone) {

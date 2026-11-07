@@ -1,22 +1,26 @@
-// ABOUTME: 录音库：搜索、筛选、批量转录与批量归类。
+// ABOUTME: 录音页：统计条、搜索筛选、批量与「全部」转录/归类，以及「导入」对话框入口。
 
-import { useMemo, useState } from 'react';
-import { Mic, Search, Sparkles, Star, Waves } from 'lucide-react';
-import type { Category, RecordingListResult, RecordingSummary } from '../../contracts/app';
-import { api, errorText } from '../api';
+import { useEffect, useMemo, useState } from 'react';
+import { FolderDown, Search, Sparkles, Star, Waves } from 'lucide-react';
+import type { BatchResult, Category, Overview, RecordingListResult, RecordingSummary } from '../../contracts/app';
+import { api } from '../api';
 import { formatDateTime, formatDuration } from '../format';
+import { buildHash, type LibraryStage } from '../router';
 import { useAsyncData, useDebounced, usePolling } from '../useApi';
 import { Button, Empty, ErrorState, Loading, Segmented, StatusChip, Tag, useToast } from '../components/ui';
+import { ImportDialog } from '../components/ImportDialog';
+import { EnvironmentBanner } from '../components/EnvironmentBanner';
 
-const STAGES = [
+type Stage = 'all' | LibraryStage;
+
+const STAGES: Array<{ value: Stage; label: string }> = [
   { value: 'all', label: '全部' },
-  { value: 'need-transcribe', label: '待转录' },
-  { value: 'need-organize', label: '待归类' },
-  { value: 'done', label: '已归档' },
+  { value: 'pending', label: '在录音笔中' },
+  { value: 'ready', label: '待转录' },
+  { value: 'transcribed', label: '待归类' },
+  { value: 'done', label: '已整理' },
   { value: 'failed', label: '失败' },
-] as const;
-
-type Stage = (typeof STAGES)[number]['value'];
+];
 
 const SORTS = [
   { value: 'newest', label: '最近入库' },
@@ -26,20 +30,58 @@ const SORTS = [
 ];
 
 interface Props {
+  stage?: LibraryStage;
+  overview: Overview | null;
+  envFailCount: number;
   onOpen: (id: number) => void;
-  onNavigate: (route: string) => void;
+  onChanged: () => void;
 }
 
-export function LibraryPage({ onOpen, onNavigate }: Props) {
+function StatsBar({ overview, onFailed }: { overview: Overview | null; onFailed: () => void }) {
+  if (!overview) return null;
+  const ready = overview.byStatus.find((item) => item.status === 'ready')?.count ?? 0;
+  return (
+    <div className="statsbar" aria-label="录音统计">
+      <span>
+        共 <strong>{overview.totalRecordings}</strong> 条
+      </span>
+      <span>
+        累计 <strong>{formatDuration(overview.totalDurationSec)}</strong>
+      </span>
+      <span>
+        待转录 <strong>{ready}</strong>
+      </span>
+      {overview.failedCount > 0 ? (
+        <button type="button" className="statsbar__failed" onClick={onFailed}>
+          失败 <strong>{overview.failedCount}</strong>
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function LibraryPage({ stage: routeStage, overview, envFailCount, onOpen, onChanged }: Props) {
   const [query, setQuery] = useState('');
-  const [stage, setStage] = useState<Stage>('all');
+  const [stage, setStageState] = useState<Stage>(routeStage ?? 'all');
   const [categoryId, setCategoryId] = useState('all');
   const [tag, setTag] = useState('all');
   const [sort, setSort] = useState('newest');
   const [selected, setSelected] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
+  const [importing, setImporting] = useState(false);
   const debouncedQuery = useDebounced(query, 260);
   const toast = useToast();
+
+  // 从统计条或外部链接带着 ?stage= 进来时同步筛选。
+  useEffect(() => {
+    setStageState(routeStage ?? 'all');
+  }, [routeStage]);
+
+  const setStage = (next: Stage) => {
+    setStageState(next);
+    setSelected([]);
+    window.history.replaceState(null, '', buildHash(next === 'all' ? { name: 'library' } : { name: 'library', stage: next }));
+  };
 
   const search = new URLSearchParams();
   if (debouncedQuery.trim()) search.set('q', debouncedQuery.trim());
@@ -62,23 +104,21 @@ export function LibraryPage({ onOpen, onNavigate }: Props) {
     setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   };
 
-  const runBatch = async (kind: 'transcribe' | 'organize') => {
-    if (selected.length === 0) return;
+  const runBatch = async (kind: 'transcribe' | 'organize', body: { ids: number[] } | { stage: 'ready' | 'transcribed' }) => {
     setBusy(true);
     try {
-      const result = await api.post<{ accepted: number; skipped: number }>(`/api/recordings/batch/${kind}`, {
-        ids: selected,
-      });
+      const result = await api.post<BatchResult>(`/api/recordings/batch/${kind}`, body);
       toast.push(
         result.accepted > 0
-          ? `已排队 ${result.accepted} 条${kind === 'transcribe' ? '转录' : '归类'}任务${result.skipped > 0 ? `，${result.skipped} 条被跳过` : ''}`
-          : '没有可处理的录音（可能缺少音频或不满足条件）',
+          ? `已开始${kind === 'transcribe' ? '转录' : '归类'} ${result.accepted} 条${result.skipped > 0 ? `，${result.skipped} 条不满足条件已跳过` : ''}`
+          : '没有可以处理的录音（可能缺少音频或还没转录）',
         result.accepted > 0 ? 'success' : 'info',
       );
       setSelected([]);
       list.reload();
+      onChanged();
     } catch (error) {
-      toast.push(errorText(error), 'error');
+      toast.error(error);
     } finally {
       setBusy(false);
     }
@@ -89,22 +129,41 @@ export function LibraryPage({ onOpen, onNavigate }: Props) {
     [stage, categoryId, tag, debouncedQuery],
   );
 
+  const clearFilters = () => {
+    setQuery('');
+    setStage('all');
+    setCategoryId('all');
+    setTag('all');
+  };
+
+  const total = list.data?.total ?? 0;
+  // 「全部…」由服务端按阶段选录音（不看搜索、分类、标签），所以只在阶段是唯一筛选条件时出现，
+  // 数量取服务端同口径的阶段计数（不含已归档，上限 400），保证按钮上的数字就是实际处理的条数。
+  const onlyStageFilter = activeFilters === 1 && !query.trim();
+  const stageCount = stage === 'ready' || stage === 'transcribed'
+    ? Math.min(400, overview?.byStatus.find((item) => item.status === stage)?.count ?? 0)
+    : 0;
+  const showAll = selected.length === 0 && onlyStageFilter && stageCount > 0;
+
   return (
     <div className="page page--library">
       <header className="page__head">
         <div>
-          <h1>录音库</h1>
+          <h1>录音</h1>
           <p className="page__sub">
-            {list.data ? `命中 ${list.data.total} 条录音` : '正在统计'}
+            {list.data ? `当前显示 ${total} 条` : '正在统计'}
             {activeFilters > 0 ? ` · ${activeFilters} 个筛选条件生效` : ''}
           </p>
         </div>
         <div className="page__actions">
-          <Button icon={<Mic size={15} aria-hidden="true" />} onClick={() => onNavigate('device')}>
-            导入新录音
+          <Button icon={<FolderDown size={15} aria-hidden="true" />} onClick={() => setImporting(true)}>
+            导入
           </Button>
         </div>
       </header>
+
+      <EnvironmentBanner failCount={envFailCount} />
+      <StatsBar overview={overview} onFailed={() => setStage('failed')} />
 
       <div className="toolbar">
         <div className="search">
@@ -117,7 +176,7 @@ export function LibraryPage({ onOpen, onNavigate }: Props) {
             aria-label="搜索录音"
           />
         </div>
-        <Segmented label="处理阶段" value={stage} options={STAGES.map((item) => ({ ...item }))} onChange={(value) => setStage(value as Stage)} />
+        <Segmented label="处理阶段" value={stage} options={STAGES} onChange={setStage} />
         <div className="toolbar__selects">
           <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} aria-label="按分类筛选">
             <option value="all">全部分类</option>
@@ -148,10 +207,10 @@ export function LibraryPage({ onOpen, onNavigate }: Props) {
       {selected.length > 0 ? (
         <div className="batchbar" role="region" aria-label="批量操作">
           <span>已选 {selected.length} 条</span>
-          <Button size="sm" disabled={busy} icon={<Waves size={14} aria-hidden="true" />} onClick={() => void runBatch('transcribe')}>
+          <Button size="sm" disabled={busy} icon={<Waves size={14} aria-hidden="true" />} onClick={() => void runBatch('transcribe', { ids: selected })}>
             批量转录
           </Button>
-          <Button size="sm" disabled={busy} icon={<Sparkles size={14} aria-hidden="true" />} onClick={() => void runBatch('organize')}>
+          <Button size="sm" disabled={busy} icon={<Sparkles size={14} aria-hidden="true" />} onClick={() => void runBatch('organize', { ids: selected })}>
             批量归类
           </Button>
           <Button size="sm" variant="quiet" onClick={() => setSelected([])}>
@@ -160,37 +219,44 @@ export function LibraryPage({ onOpen, onNavigate }: Props) {
         </div>
       ) : null}
 
+      {showAll ? (
+        <div className="batchbar" role="region" aria-label="全部处理">
+          {stage === 'ready' ? (
+            <Button size="sm" variant="primary" disabled={busy} icon={<Waves size={14} aria-hidden="true" />} onClick={() => void runBatch('transcribe', { stage: 'ready' })}>
+              全部转录（{stageCount}）
+            </Button>
+          ) : (
+            <Button size="sm" variant="primary" disabled={busy} icon={<Sparkles size={14} aria-hidden="true" />} onClick={() => void runBatch('organize', { stage: 'transcribed' })}>
+              全部归类（{stageCount}）
+            </Button>
+          )}
+        </div>
+      ) : null}
+
       {list.loading && !list.data ? <Loading label="正在读取录音" /> : null}
-      {list.error ? <ErrorState message={list.error} onRetry={list.reload} /> : null}
+      {list.error ? <ErrorState error={list.error} onRetry={list.reload} /> : null}
 
       {list.data && items.length === 0 ? (
-        <Empty
-          title={activeFilters > 0 ? '没有符合条件的录音' : '录音库还是空的'}
-          description={
-            activeFilters > 0
-              ? '试着放宽筛选条件，或清空搜索关键词。'
-              : '先到设备页扫描导入目录或从录音笔拉取文件清单。'
-          }
-          action={
-            activeFilters > 0 ? (
-              <Button
-                size="sm"
-                onClick={() => {
-                  setQuery('');
-                  setStage('all');
-                  setCategoryId('all');
-                  setTag('all');
-                }}
-              >
+        activeFilters > 0 ? (
+          <Empty
+            title="没有符合条件的录音"
+            description="试着放宽筛选条件，或清空搜索关键词。"
+            action={
+              <button type="button" className="linkbtn" onClick={clearFilters}>
                 清空筛选
-              </Button>
-            ) : (
-              <Button size="sm" variant="primary" onClick={() => onNavigate('device')}>
-                去导入录音
-              </Button>
-            )
-          }
-        />
+              </button>
+            }
+          />
+        ) : (
+          <Empty
+            title="还没有录音"
+            action={
+              <p className="empty__desc">
+                连上录音笔后在「<a href="#/device">录音笔</a>」页同步，或点右上角「导入」。
+              </p>
+            }
+          />
+        )
       ) : null}
 
       {items.length > 0 ? (
@@ -224,6 +290,19 @@ export function LibraryPage({ onOpen, onNavigate }: Props) {
           </ul>
         </div>
       ) : null}
+
+      {importing ? (
+        <ImportDialog
+          onClose={() => setImporting(false)}
+          onImported={(result) => {
+            if (result.imported > 0) {
+              list.reload();
+              tags.reload();
+              onChanged();
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -252,7 +331,7 @@ function Row({
         <span className="row__meta">
           {formatDateTime(item.recordedAt ?? item.createdAt)}
           {item.transcriptChars > 0 ? ` · ${item.transcriptChars} 字转写` : ''}
-          {item.hasAudioFile ? '' : ' · 缺音频文件'}
+          {item.hasAudioFile || item.status === 'pending' ? '' : ' · 缺音频文件'}
         </span>
       </button>
       <span className="col-category">

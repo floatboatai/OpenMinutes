@@ -1,18 +1,21 @@
 // ABOUTME: 实时字幕会话：编排采集脚本、ffmpeg 解码与 Host ASR 流式识别。
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { AppError, type AppErrorView } from '../contracts/errors';
+import type { DeviceService } from './device/service';
+import { classifyDeviceError } from './device/errors';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { WorkbenchServer } from '../../sdk/runtime.mjs';
 import type { LiveState } from '../contracts/app';
-import { probePython, probeSdk, pythonRuntimeEnv, resolveFfmpeg } from './bridge';
+import { probePython, probeSdk, pythonRuntimeEnv, resolveFfmpeg } from './runtime-probe';
 import { autoTranscribeIfEnabled, queueOrganization } from './jobs';
 import { ensureMonthDir, libraryRoot } from './library';
 import { fileSize, terminateChild } from './media';
 import { nowIso, readSetting, row, run } from './sql';
 import { liveScriptSource } from './live-script';
-import { finishLiveAsr, pumpFrames } from './live-asr';
+import { appendDetail, finishLiveAsr, pumpFrames } from './live-asr';
 import { createPcmFramer, LIVE_DECODER_ARGS } from './live-audio';
 
 const PCM_BYTES_PER_SECOND = 32_000;
@@ -21,6 +24,10 @@ interface Runtime {
   app: WorkbenchServer;
   status: 'starting' | 'listening' | 'error';
   message: string | null;
+  detail?: string;
+  error: AppErrorView | null;
+  service: DeviceService | null;
+  released: boolean;
   startedAt: number;
   endedAt: number | null;
   finals: string[];
@@ -51,13 +58,24 @@ interface SavedLive {
 let current: Runtime | null = null;
 let lastSaved: SavedLive | null = null;
 
-export class LiveError extends Error {
-  readonly code: string;
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = 'LiveError';
-    this.code = code;
-  }
+/** 页面只显示 message；脚本与识别服务的原文合并进 detail。 */
+function liveError(rt: Runtime): AppErrorView | null {
+  if (!rt.error) return null;
+  const detail = [rt.error.detail, rt.detail].filter(Boolean).join('\n');
+  return detail ? { ...rt.error, detail } : rt.error;
+}
+
+function fail(rt: Runtime, error: AppError): void {
+  rt.status = 'error';
+  rt.message = error.message;
+  rt.error = error.toView();
+}
+
+/** 采集结束后把录音笔交还设备服务（只交还一次）。 */
+function releaseDevice(rt: Runtime): void {
+  if (rt.released || !rt.service) return;
+  rt.released = true;
+  void rt.service.releaseFromLive().catch(() => undefined);
 }
 
 export function getLiveState(): LiveState {
@@ -74,6 +92,7 @@ export function getLiveState(): LiveState {
       partial: '',
       deviceName: null,
       lastSaved,
+      error: null,
     };
   }
   return {
@@ -88,6 +107,7 @@ export function getLiveState(): LiveState {
     partial: current.partial,
     deviceName: current.deviceName,
     lastSaved,
+    error: liveError(current),
   };
 }
 
@@ -109,7 +129,8 @@ function handleStderrLine(rt: Runtime, line: string): void {
   const trimmed = line.trim();
   if (!trimmed) return;
   if (!trimmed.startsWith('{')) {
-    rt.message = rt.message ?? trimmed.slice(0, 200);
+    // 非 JSON 的输出（traceback 等）只进技术详情，不直接显示给用户。
+    appendDetail(rt, trimmed.slice(0, 500));
     return;
   }
   try {
@@ -119,29 +140,35 @@ function handleStderrLine(rt: Runtime, line: string): void {
     if (event === 'streaming') {
       rt.status = 'listening';
       rt.message = null;
+      rt.error = null;
     }
     if (event === 'error') {
-      rt.status = 'error';
-      rt.message = String(payload.message ?? '采集脚本报错');
+      const kind = String(payload.kind ?? 'Error');
+      fail(rt, classifyDeviceError(kind, String(payload.message ?? ''), { op: 'live', stderrTail: rt.detail }));
     }
   } catch {
-    /* 非法 JSON 行忽略 */
+    appendDetail(rt, trimmed.slice(0, 500));
   }
 }
 
-export async function startLive(app: WorkbenchServer): Promise<LiveState> {
-  if (current && !current.exited) throw new LiveError('ALREADY_RUNNING', '实时字幕已经在运行');
+function runtimeMissing(detail: string): AppError {
+  return new AppError('RUNTIME_MISSING', undefined, detail);
+}
+
+export async function startLive(app: WorkbenchServer, service: DeviceService): Promise<LiveState> {
+  if (current && !current.exited) throw new AppError('LIVE_RUNNING', '实时字幕已经在运行');
 
   const db = app.database;
-  const { command: pythonCommand } = await probePython(readSetting(db, 'python_path'));
-  if (!pythonCommand) throw new LiveError('NO_PYTHON', '未找到 Python 解释器，无法启动采集脚本');
+  const { command: pythonCommand, probe } = await probePython(readSetting(db, 'python_path'));
+  if (!pythonCommand) throw runtimeMissing(probe.detail);
   const sdk = await probeSdk(pythonCommand);
-  if (!sdk.ok) throw new LiveError('NO_SDK', sdk.detail);
+  if (!sdk.ok) throw runtimeMissing(sdk.detail);
   const ffmpegPath = await resolveFfmpeg(db);
-  if (!ffmpegPath) throw new LiveError('NO_FFMPEG', '未找到 ffmpeg，无法解码音频流');
+  if (!ffmpegPath) throw runtimeMissing('ffmpeg not found; set ffmpeg_path in 设置 › 诊断与高级');
 
   const dataDir = await resolveDataDirectory(app);
   const script = await ensureScript(dataDir);
+  const env = await pythonRuntimeEnv(pythonCommand);
 
   lastSaved = null;
   const startedAt = Date.now();
@@ -149,10 +176,16 @@ export async function startLive(app: WorkbenchServer): Promise<LiveState> {
   const stamp = new Date(startedAt).toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '_');
   const filePath = path.join(monthDir, `LIVE_${stamp}.mp3`);
 
+  // 设备服务是录音笔的唯一所有者：由它断开 worker 并派生采集脚本；同步中会抛 DEVICE_BUSY。
+  const python = await service.claimForLive({ pythonCommand, scriptPath: script, env, scanTimeoutSec: 12 });
+
   const session: Runtime = {
     app,
     status: 'starting',
     message: null,
+    error: null,
+    service,
+    released: false,
     startedAt,
     endedAt: null,
     finals: [],
@@ -161,7 +194,7 @@ export async function startLive(app: WorkbenchServer): Promise<LiveState> {
     audioBytes: 0,
     filePath,
     deviceName: null,
-    python: null,
+    python,
     ffmpeg: null,
     fileStream: null,
     streamId: null,
@@ -176,29 +209,18 @@ export async function startLive(app: WorkbenchServer): Promise<LiveState> {
   current = session;
 
   try {
-    const env = await pythonRuntimeEnv(pythonCommand);
-    const python = spawn(pythonCommand, ['-X', 'utf8', script, '--scan-timeout', '12'], {
-      windowsHide: true,
-      ...(env ? { env } : {}),
-    });
-    const ffmpeg = spawn(
-      ffmpegPath,
-      LIVE_DECODER_ARGS,
-      { windowsHide: true },
-    );
-    session.python = python;
+    const ffmpeg = spawn(ffmpegPath, LIVE_DECODER_ARGS, { windowsHide: true });
     session.ffmpeg = ffmpeg;
     for (const child of [python, ffmpeg]) {
       child.stdin.on('error', (error) => {
         if (!session.stopping) {
-          session.status = 'error';
-          session.message = error.message;
+          appendDetail(session, `stdin: ${error.message}`);
+          fail(session, new AppError('DECODE_FAILED', undefined, error.message));
         }
       });
     }
     ffmpeg.on('error', (error) => {
-      session.status = 'error';
-      session.message = error.message;
+      fail(session, new AppError('RUNTIME_MISSING', undefined, `ffmpeg: ${error.message}`));
       terminateChild(python);
     });
     session.fileStream = createWriteStream(filePath);
@@ -226,26 +248,27 @@ export async function startLive(app: WorkbenchServer): Promise<LiveState> {
       session.exited = true;
       session.endedAt = Date.now();
       if (!session.stopping && session.status !== 'error') {
-        session.status = 'error';
-        session.message = session.message ?? `采集脚本退出（退出码 ${code ?? '未知'}）`;
+        fail(session, new AppError('DEVICE_DISCONNECTED', undefined, `live capture exited (code ${code ?? '-'})\n${session.detail ?? ''}`));
       }
       if (!ffmpeg.stdin.destroyed) ffmpeg.stdin.end();
+      // 用户主动停止时由 stopLive 在保存后交还；意外退出立即交还。
+      if (!session.stopping) releaseDevice(session);
     });
     python.on('error', (error) => {
       session.exited = true;
       session.endedAt = Date.now();
-      session.status = 'error';
-      session.message = `采集脚本启动失败：${error.message}`;
+      fail(session, new AppError('RUNTIME_MISSING', undefined, `cannot start live capture: ${error.message}`));
+      releaseDevice(session);
     });
 
     return getLiveState();
   } catch (error) {
     session.exited = true;
     session.endedAt = Date.now();
-    session.status = 'error';
-    session.message = error instanceof Error ? error.message : '启动失败';
+    terminateChild(python);
+    releaseDevice(session);
     current = null;
-    throw error instanceof LiveError ? error : new LiveError('START_FAILED', session.message ?? '启动失败');
+    throw error instanceof AppError ? error : new AppError('INTERNAL_ERROR', undefined, String(error));
   }
 }
 
@@ -298,12 +321,14 @@ export async function stopLive(app: WorkbenchServer): Promise<LiveState> {
     await closeFileStream(session.fileStream);
 
     if (session.audioBytes === 0 && !text) {
-      session.message = session.message ?? '这次没有采集到音频（设备可能未唤醒或未进入录音）';
+      session.message = session.message ?? '这次没有采集到音频（录音笔可能未唤醒或未在录音）';
     } else {
       lastSaved = await persistSession(app, session, text);
     }
   } finally {
     current = null;
+    // 采集脚本已退出：把录音笔交还设备服务，之前是用户连接的会自动恢复连接。
+    releaseDevice(session);
   }
   return getLiveState();
 }

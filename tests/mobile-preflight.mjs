@@ -45,7 +45,7 @@ export async function checkMobile(run) {
     });
     await send('Runtime.enable');
     await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
-    await send('Page.navigate', { url: `${run.url}/#/device` });
+    await send('Page.navigate', { url: `${run.url}/#/settings/diagnostics` });
     let ready = false;
     for (let attempt = 0; attempt < 120 && !ready; attempt++) {
       const value = await send('Runtime.evaluate', { expression: '!!document.querySelector("[data-preflight-id=system]")', returnByValue: true });
@@ -55,6 +55,11 @@ export async function checkMobile(run) {
     assert.ok(ready, 'mobile preflight rendered');
     const measured = await send('Runtime.evaluate', { returnByValue: true, expression: `({
       viewport: innerWidth,
+      nav: [...document.querySelectorAll('nav[aria-label="主导航"] button')].map(button => {
+        button.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+        const box = button.getBoundingClientRect();
+        return { label: button.innerText.trim(), reachable: box.width > 0 && box.height > 0 && box.left >= 0 && box.right <= innerWidth + 1 };
+      }),
       width: document.documentElement.scrollWidth,
       rows: [...document.querySelectorAll('.environment-panel .env__row')].map(row => ({
         id: row.dataset.preflightId,
@@ -64,6 +69,8 @@ export async function checkMobile(run) {
       }))
     })` });
     assert.equal(measured.result.value.viewport, 390);
+    assert.deepEqual(measured.result.value.nav.map((item) => item.label.replace(/\s*\d+$/, '')), ['录音', '录音笔', '实时字幕', '日历', '分类', '设置']);
+    assert.ok(measured.result.value.nav.every((item) => item.reachable), JSON.stringify(measured.result.value.nav));
     assert.ok(measured.result.value.width <= 390, JSON.stringify(measured.result.value));
     assert.ok(measured.result.value.rows.every((row) => !row.overflow));
     assert.deepEqual(errors, []);
