@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { launch } from './launch.mjs';
@@ -17,7 +18,8 @@ function fixture(t) {
       if (alive(pid)) { process.kill(pid, 'SIGKILL'); await waitStopped(pid); }
     }
     assert.match(relative(realpathSync(tmpdir()), root), /^openminutes-safety-[^\\/]+$/);
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    // Yield between retries so Windows can release the exited child's directory handles.
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   writeFileSync(join(root, 'sentinel'), 'keep');
   return root;
