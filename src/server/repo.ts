@@ -1,5 +1,6 @@
 // ABOUTME: 录音、分类与总览的读取查询，SQL 集中在本模块便于校验。
 
+import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type {
   AnalysisRecord,
@@ -16,6 +17,7 @@ import type {
 import { bool, jsonArray, num, numOr, row, rows, str, strOr } from './sql';
 import { likePattern } from '../contracts/input';
 import { hasRecordingTasks, queuedRecordingStatus } from './queue';
+import { displayPath } from './library';
 
 const RECORDING_SELECT = `
   SELECT r.id, r.filename, r.title, r.source, r.status, r.category_id,
@@ -65,6 +67,9 @@ function toSummary(source: Record<string, unknown>, tagMap: Map<number, Array<{ 
   const status = storedStatus === 'transcribing' || storedStatus === 'analyzing'
     ? storedStatus
     : queuedRecordingStatus(id) ?? storedStatus;
+  const storagePath = str(source.storage_path);
+  // 历史相对文件名要靠 Host 资源目录解析，列表里只标「本机」，点开时由服务端再解析。
+  const folderPath = storagePath && path.isAbsolute(storagePath) ? path.dirname(storagePath) : null;
   return {
     id,
     filename: strOr(source.filename, ''),
@@ -84,7 +89,10 @@ function toSummary(source: Record<string, unknown>, tagMap: Map<number, Array<{ 
     isFavorite: bool(source.is_favorite),
     isArchived: bool(source.is_archived),
     transcriptChars: numOr(source.transcript_chars, 0),
-    hasAudioFile: typeof source.storage_path === 'string' && source.storage_path.length > 0,
+    hasAudioFile: Boolean(storagePath),
+    location: storagePath ? 'local' : storedStatus === 'pending' ? 'device' : 'none',
+    folderPath,
+    folderLabel: folderPath ? displayPath(folderPath) : null,
     deviceSerial: str(source.device_serial),
     tags: tagMap.get(id) ?? [],
   };

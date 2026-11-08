@@ -68,7 +68,7 @@ const SYSTEM_PROMPT = [
 const JSON_ONLY = '只输出一个 JSON 对象，不要解释、不要 Markdown 代码块。';
 
 /** 从自由文本里取出第一个完整 JSON 对象，容忍代码块包裹。 */
-function extractJsonObject(text: string): unknown {
+export function extractJsonObject(text: string): unknown {
   const trimmed = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '');
   const start = trimmed.indexOf('{');
   const end = trimmed.lastIndexOf('}');

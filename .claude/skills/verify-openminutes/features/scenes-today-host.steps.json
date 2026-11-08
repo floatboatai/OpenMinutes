@@ -1,0 +1,20 @@
+[
+  {"goto":"#/rec/1"},
+  {"waitText":"返回录音"},
+  {"eval":"(async () => { const required = { asr: ['start', 'sendFrame', 'events', 'stop'], llm: ['generateObject', 'generateText'] }; const response = await fetch('/api/environment/capabilities'); const body = await response.json(); const capabilities = body.data; const ready = (domain, operations) => operations.every(operation => capabilities?.[domain]?.some(item => item.operation === operation && item.declared === true && item.status === 'available')); if (!response.ok || !body.ok || !ready('asr', required.asr) || !ready('llm', required.llm)) throw Error('Host ASR/LLM capabilities incomplete; no paid task submitted'); const b = await fetch('/api/recordings/1').then(r => r.json()); if (!b.ok || b.data.recording.status !== 'ready' || b.data.jobs.length) throw Error('Requires fresh recording 1; do not rerun paid calls'); const day = await fetch('/api/scenes?day=2026-10-29').then(r => r.json()); if (!day.ok || day.data.status !== 'idle' || day.data.scenes.length) throw Error('Scene day must start idle: ' + JSON.stringify(day)); return { recording: b.data.recording.filename, day: day.data.status }; })()"},
+  {"click":"text=开始转录"},
+  {"waitText":"转录任务已排队"},
+  {"waitText":"待归类","timeout":120000},
+  {"goto":"#/today?day=2026-10-29"},
+  {"waitFor":"aria=场景时间线","timeout":240000},
+  {"eval":"(async () => { const deadline = Date.now() + 240000; let body; while (Date.now() < deadline) { body = await fetch('/api/scenes?day=2026-10-29', { headers: { connection: 'close' } }).then(r => r.json()); if (body.ok && body.data.status === 'done') break; await new Promise(r => setTimeout(r, 1500)); } const d = body?.data; if (!d || d.status !== 'done' || d.stale || !d.scenes.length || d.transcribedCount !== 1) throw Error('Scene day not done: ' + JSON.stringify(body)); const templates = new Map(d.templates.map(t => [t.slug, t])); for (const scene of d.scenes) { if (!scene.sources.some(s => s.recordingId === 1) || !templates.has(scene.templateSlug) || !scene.startAt || !scene.endAt) throw Error('Bad scene: ' + JSON.stringify(scene)); const t = templates.get(scene.templateSlug); if (t.extract && scene.extraction?.status !== 'done') throw Error('Extraction missing: ' + JSON.stringify(scene)); if (!t.extract && scene.extraction) throw Error('Ambient scene must not be extracted'); } window.__day = d; return { message: d.message, scenes: d.scenes.map(s => ({ template: s.templateSlug, type: s.sceneType, title: s.title, fields: s.extraction ? Object.keys(s.extraction.fields) : null })) }; })()"},
+  {"waitText":"个已整理"},
+  {"eval":"(() => { const d = window.__day; const cards = [...document.querySelectorAll('.scene-card')]; const blocks = [...document.querySelectorAll('[aria-label=\"场景时间线\"] button')]; if (cards.length !== d.scenes.length || blocks.length !== d.scenes.length) throw Error('UI count mismatch: cards=' + cards.length + ' blocks=' + blocks.length); const text = document.body.innerText; for (const scene of d.scenes) { if (scene.title && !text.includes(scene.title)) throw Error('Missing scene title in UI: ' + scene.title); const link = document.querySelector('#scene-' + scene.id + ' a[href=\"#/rec/1\"]'); if (!link) throw Error('Scene must link to recording 1'); } blocks[0].setAttribute('data-verify-block', 'true'); return { cards: cards.length }; })()"},
+  {"screenshot":"01-scenes.png"},
+  {"aria":"01-scenes.aria.txt"},
+  {"click":"[data-verify-block]"},
+  {"eval":"(() => { const first = window.__day.scenes[0]; const card = document.getElementById('scene-' + first.id); if (!card?.classList.contains('is-selected') || document.querySelector('[data-verify-block]')?.getAttribute('aria-pressed') !== 'true') throw Error('Timeline click did not select the scene card'); return first.id; })()"},
+  {"screenshot":"02-selected.png"},
+  {"aria":"02-selected.aria.txt"},
+  {"eval":"(() => { const button = [...document.querySelectorAll('main .page__actions button')].find((b) => b.innerText.trim() === '重新整理'); if (!button || button.disabled) throw Error('重新整理 should be available after a finished day'); return 'rebuild-available'; })()"}
+]

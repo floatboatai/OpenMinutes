@@ -66,7 +66,7 @@ node .claude/skills/verify-openminutes/scripts/browse.mjs <runId> <label> @steps
 node .claude/skills/verify-openminutes/scripts/browse.mjs <runId> open-detail '[{"goto":"#/library"},{"waitFor":"button.row__main"},{"click":"button.row__main"},{"waitText":"返回录音"},{"eval":"location.hash"},{"screenshot":"detail.png"},{"aria":"detail.aria.txt"}]'
 ```
 
-页面路由：`#/library`（默认，可带 `?stage=failed|ready|transcribed|pending`）、`#/rec/<id>`、`#/device`、`#/live`、`#/calendar`（可带 `?day=YYYY-MM-DD&rec=<id>`）、`#/categories`、`#/settings`、`#/settings/diagnostics`。`#/overview` 和未知哈希会被改写为 `#/library`。侧边导航是 `navigation "主导航"` 下的 6 个按钮：录音 / 录音笔 / 实时字幕 / 日历 / 分类 / 设置，每页 `<h1>` 与导航标签一致。详情页的返回按钮文字随来源变化（「返回录音」「返回日历」）。
+页面路由：`#/library`（默认，可带 `?stage=failed|ready|transcribed|pending`）、`#/today`（可带 `?day=YYYY-MM-DD`）、`#/rec/<id>`、`#/device`、`#/live`、`#/calendar`（可带 `?day=YYYY-MM-DD&rec=<id>`）、`#/categories`、`#/settings`、`#/settings/diagnostics`。`#/overview` 和未知哈希会被改写为 `#/library`。侧边导航是 `navigation "主导航"` 下的 7 个按钮：录音 / 今日 / 录音笔 / 实时字幕 / 日历 / 分类 / 设置，每页 `<h1>` 与导航标签一致。详情页的返回按钮文字随来源变化（「返回录音」「返回日历」）。
 
 入口速查（每个功能只有一个入口）：导入本地文件夹在录音页头「导入」→「扫描并导入」；连接、同步录音、断开连接、清理已同步的录音、停止只在录音笔页；录音与日程的关联只在日历页；本机环境、Python/ffmpeg 路径、传输方式、最近设备操作、设备协议指令参考、手动登记清单只在「设置 › 诊断与高级」（`#/settings/diagnostics`，自动展开 `details#diagnostics`）。错误主行是中文结论，技术原文要点「查看详情」才出现。
 

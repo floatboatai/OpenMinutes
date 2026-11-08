@@ -4,6 +4,7 @@ export type LibraryStage = 'pending' | 'ready' | 'transcribed' | 'done' | 'faile
 
 export type Route =
   | { name: 'library'; stage?: LibraryStage }
+  | { name: 'today'; day?: string }
   | { name: 'device' }
   | { name: 'live' }
   | { name: 'calendar'; day?: string; rec?: number }
@@ -11,7 +12,7 @@ export type Route =
   | { name: 'settings'; section?: 'diagnostics' }
   | { name: 'detail'; id: number };
 
-export type NavKey = 'library' | 'device' | 'live' | 'calendar' | 'categories' | 'settings';
+export type NavKey = 'library' | 'today' | 'device' | 'live' | 'calendar' | 'categories' | 'settings';
 
 const STAGES: readonly LibraryStage[] = ['pending', 'ready', 'transcribed', 'done', 'failed'];
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -40,6 +41,10 @@ export function parseHash(hash: string): Route | null {
     case 'live':
     case 'categories':
       return { name: path };
+    case 'today': {
+      const day = params.get('day');
+      return day && DAY_PATTERN.test(day) ? { name: 'today', day } : { name: 'today' };
+    }
     case 'calendar': {
       const day = params.get('day');
       const rec = positiveInt(params.get('rec'));
@@ -64,6 +69,8 @@ export function buildHash(route: Route): string {
       return `#/rec/${route.id}`;
     case 'library':
       return route.stage ? `#/library?stage=${route.stage}` : '#/library';
+    case 'today':
+      return route.day ? `#/today?day=${route.day}` : '#/today';
     case 'calendar': {
       const params = new URLSearchParams();
       if (route.day) params.set('day', route.day);

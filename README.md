@@ -33,6 +33,7 @@ The left navigation has six fixed items. Every feature has exactly one entry poi
 | Recordings (录音, default) | Stats bar (click "failed N" to filter failures), full-text search over transcripts, titles, and summaries, stage/category/tag filters and sorting, batch or "transcribe all / organize all (N)", and the **Import** dialog that scans a local folder. A recording's detail page offers HTTP Range playback, sentence-timestamp seeking, transcript / AI analysis / processing-history sections, manual edits, export, and deletion; its header has a single primary action that follows the recording's state |
 | Recorder (录音笔) | Connect / disconnect, battery and free space, sync (with progress and **Stop**), the "still on the recorder" list with per-item sync, cleanup of already-synced recordings to free recorder space, and auto-connect status. The recorder clock is synced on connect |
 | Live captions (实时字幕) | Stream recorder audio through Floatboat speech recognition, then save the recording and any text when stopped |
+| Today (今日) | Two bots work over a whole day of recordings: Shell-picker (拾贝) splits it into scenes and matches a template; Bead-stringer (串珠) extracts people, concepts, methods, decisions, todos and ideas per template. Runs automatically after transcription; can be re-run manually |
 | Calendar (日历) | Day view of events and recordings, linking recordings to events (the only place to do so), new events, `.ics` import, and meeting digests |
 | Categories (分类) | Create, rename inline, recolor, and delete custom categories (built-in ones cannot be deleted); each shows its recording count and total duration |
 | Settings (设置) | General (folders) / Automation / Recognition / Diagnostics & advanced. Diagnostics & advanced is the single place for technical detail: environment checks and "let the Floatboat assistant repair", Python/ffmpeg paths, transport, recent recorder operations, Host capabilities, the device protocol reference, and developer tools |
@@ -147,7 +148,7 @@ src/
     live-audio.ts  Live MP3 decoder arguments and one-second PCM framing
     live-asr.ts    On-demand live ASR sessions and frame streaming
     live-script.ts Python script for device SDK live audio streaming
-  ui/              React UI: recordings / details / recorder / live captions / calendar / categories / settings (incl. diagnostics)
+  ui/              React UI: recordings / today / details / recorder / live captions / calendar / categories / settings (incl. diagnostics)
 migrations/        Append-only SQLite migrations (0001-0007)
 sdk/               Host SDK: Host-provided Workbench runtime, clients, contracts, and types (not modified)
 tests/             Server tests
@@ -242,6 +243,9 @@ Flags accept only `"0"` or `"1"`. Auto-connect runs while the workbench server i
 | `POST` | `/api/calendar/digest` | Generate a daily digest |
 | `POST` | `/api/calendar/import` | Import an `.ics` file |
 | `GET` | `/api/recordings/:id/calendar-suggestions` | Suggest events to link based on the recording time |
+| `GET` | `/api/scenes?day=YYYY-MM-DD` | Scenes of one local day: timeline, matched template, per-template extraction, status and staleness |
+| `POST` | `/api/scenes/rebuild` | Queue re-segmentation and extraction for `{ day }`; rejected when the day has no transcripts |
+| `GET` | `/api/templates` | Active scene templates (built-in: social, lecture, meeting, musing, ambient) |
 | `GET`, `POST` | `/api/categories` | List or create categories |
 | `PATCH`, `DELETE` | `/api/categories/:id` | Update or delete a category |
 | `GET`, `PATCH` | `/api/settings` | Read settings or update the writable keys listed above |

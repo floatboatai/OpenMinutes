@@ -81,6 +81,8 @@ export async function launch(root, runId, { readyTimeout = 30000, hostMode = 'no
     child = spawn(process.execPath, ['--enable-source-maps', entry], {
       cwd: root, env: {
         ...process.env, FLOATBOAT_WORKBENCH_CONFIG: configPath,
+        // 「打开所在文件夹」只记录调用，不弹资源管理器、不在用户的 Floatboat 里开标签页。
+        OPENMINUTES_FAKE_REVEAL: join(evidenceDir, 'reveal.log'),
         ...(fakeDevice ? { OPENMINUTES_FAKE_DEVICE: fakeDevice, OPENMINUTES_FAKE_DEVICE_AUDIO_DIR: fakeAudioDir } : {}),
       },
       detached: true, windowsHide: true, stdio: ['ignore', log, log],

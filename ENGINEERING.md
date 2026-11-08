@@ -31,7 +31,8 @@
 | `server/transcribe.ts` | Host ASR 会话：参数降级启动、推流、事件收集、收尾与错误归类 |
 | `server/organize.ts` | Host LLM 结构化归类：提示词、JSON Schema、文本回退与结论落库 |
 | `server/pipeline.ts` | 转录/归类状态机：`job_runs` 记录、失败可重试、自动归类开关；失败分列写 `last_error` / `last_error_code` / `last_error_detail` |
-| `server/queue.ts` | 串行执行任务；保留等待/运行中标签至任务结束，提供快照、单条排队状态与全库录音任务查询；`transcribe:` / `organize:` 任务执行前等待网络闸门 |
+| `server/queue.ts` | 按标签前缀分车道执行任务：`transcribe` 车道并行上限取 `asr_concurrency`（1–8，默认 3），其它车道串行；支持延迟入队（排队可见但不占名额）；保留等待/运行中标签至任务结束，提供快照、`isRunning`、`whenIdle`、单条排队状态与全库录音任务查询；`transcribe:` / `organize:` / `scenes:` 任务执行前等待网络闸门 |
+| `server/transcribe-checkpoints.ts` | 断点续转检查点（`transcribe_checkpoints`，按 5 分钟块，带源文件 size+mtime 与参数指纹）与排队意图（`queued_tasks`）的读写 |
 | `server/jobs.ts` | `trackTask` 与队列装配、导入/同步后自动转录 |
 | `server/calendar.ts`、`calendar-import.ts`、`calendar-digest.ts` | 日历事件、`.ics` 导入、录音关联与建议、会议纪要/日报（调用 Host 前 `assertOnline`） |
 | `server/preflight.ts` | 本机环境自检（分组 device/audio/ai/storage，技术原文进 `detail`）；`listHostCapabilities` 是宿主能力的唯一来源 |
@@ -48,7 +49,7 @@
 - 旧的设备细粒度接口（读状态、读清单、单条下载、环境检查、能力清单、摘要、删除设备记录）、创建导入目录接口和 `PUT /api/recordings/:id` 已删除，不保留兼容别名；对应能力分别并入上述设备任务接口、`/api/environment/*` 与 `PATCH /api/recordings/:id`。
 - `PATCH /api/settings` 使用 `{ values: { key: string } }`，先校验所有键再写入。路径键为 `import_dir`、`library_dir`、`python_path`、`ffmpeg_path`；开关键为 `auto_transcribe`、`auto_analyze`、`auto_connect`、`auto_pull`、`auto_pull_wifi`、`speaker_diarization`，值只接受 `"0"` / `"1"`；枚举键 `device_transport` 取 `auto` / `wifi` / `ble`。
 - `auto_connect_minutes` 接受 1~120 的整数字符串，默认 3；文本键为 `asr_hotwords`、`asr_language`，长度上限 300、20 字符；路径上限 500 字符。`sdk_dir` 读取隐藏、提交忽略；其他未知键拒绝。运行时写入的 `device_serial`、`device_user_disconnected`、`last_auto_connect_at`、`last_auto_pull_at` 可以读取，不能由该接口修改。
-- 设置页分为通用（目录）/ 自动化 / 识别 / 诊断与高级（Python/ffmpeg 路径、传输方式）。`auto_pull_wifi` 默认 `"0"`，其余五个开关默认 `"1"`。
+- 设置页分为通用（目录）/ 自动化 / 识别 / 诊断与高级（Python/ffmpeg 路径、同时转录的录音数 `asr_concurrency`、传输方式）。`auto_pull_wifi` 默认 `"0"`，其余五个开关默认 `"1"`。
 - `asr_language` 当前只写入文件转录结果元数据，未从流水线传给 ASR；实时识别仅传固定 PCM 参数，不读取热词、语言或说话人分离设置。
 - 自动连接调度器每 30 秒检查：`auto_connect==='1'`、`device_user_disconnected!=='1'`、当前未连接且不在实时字幕中、已到 `nextAttemptAt`。满足后以 `origin:'auto'` 连接，`auto_pull==='1'` 时后台同步，结束后断开。
 
@@ -157,6 +158,9 @@
 
 - ASR 启动按「完整参数 → 基础参数」逐级降级；可选开关（语义标点、说话人分离、热词）被服务端拒绝时不阻断转录，降级过程记录在任务错误信息中。
 - 文件转录按 5 分钟音频分块，每块单独开 ASR 会话。实测长会话会中途收到 `ASR_UPSTREAM_FAILED`，之后 `sendFrame` 报 `ASR_AUDIO_SEND_FAILED` / `ASR_SESSION_NOT_RUNNING`；此时保留已确认句子，从最后一句结束处开新会话续传（每块最多 4 次，全程最多 16 次）。会话 `text` 只保证最近内容，最终文本一律用逐句结果拼接。
+- 断点续转：每块识别完成即写 `transcribe_checkpoints`；再次转录时先比对源文件 size+mtime 与参数指纹（分块秒数、说话人分离、热词），一致则跳过已完成块（不送 ASR，用存下的分段按原偏移拼接），不一致则清空重来。60 分钟上限只计实际送识别的耗时。写入 `transcripts` 成功后删除检查点，失败保留。
+- 识别服务会话已满（Host 以 429 拒绝 `asr.start`，例如超过 8 个活动会话；Host 客户端不保留 HTTP 状态，按错误码 `isCapacityError` 判断）时抛 `ASR_BUSY`：录音恢复执行前状态，`job_runs` 记 `interrupted`，`jobs.ts` 按 5 秒递增到 1 分钟延迟重新排队，最多 30 次后才以 `ASR_BUSY` 失败。
+- 重启恢复：`recoverInterruptedTasks` 把 `transcribing` / `analyzing` 录音退回 `ready`/`transcribed` 并补写 `queued_tasks`，`running` 的 `job_runs` 标 `interrupted`；`index.ts` 在 `listen()` 之后用 `resumeQueuedTasks` 按排队顺序延迟 2 秒重新入队（已在内存队列中的跳过），转录从检查点继续。
 - 转录诊断：每次转录的阶段轨迹（会话、续传、失败请求 ID）写入 `job_runs.detail_json.trace`，运行中 `job_runs.message` 实时更新进度，详情页据此显示。
 - LLM 优先 `generateObject`；若服务端拒绝该 JSON Schema，回退 `generateText` 并本地抽取 JSON，再做字段收敛与分类枚举校验。
 - 实时字幕的识别会话**按需开启**：只在收到第一帧 PCM 时才 `asr.start`，避免连接/等待阶段空转到 60 秒被服务端回收；会话被回收或上游异常时自动重建（连续失败 4 次熔断并提示重开）。

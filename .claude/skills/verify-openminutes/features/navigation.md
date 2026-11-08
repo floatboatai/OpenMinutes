@@ -1,10 +1,10 @@
 # 导航与单一入口
 
-侧栏固定 6 项：录音、录音笔、实时字幕、日历、分类、设置。每页的 `<h1>` 与导航标签一致，当前页按钮带 `aria-current="page"`。详情页高亮「录音」，`#/settings/diagnostics` 高亮「设置」并自动展开「诊断与高级」。旧的 `#/overview` 和未知哈希都改写为 `#/library`。
+侧栏固定 7 项：录音、今日、录音笔、实时字幕、日历、分类、设置。每页的 `<h1>` 与导航标签一致，当前页按钮带 `aria-current="page"`。详情页高亮「录音」，`#/settings/diagnostics` 高亮「设置」并自动展开「诊断与高级」。旧的 `#/overview` 和未知哈希都改写为 `#/library`。
 
 ## Sub-features
 
-- `nav-six`：`nav[aria-label="主导航"] button` 恰好 6 个，顺序固定。
+- `nav-seven`：`nav[aria-label="主导航"] button` 恰好 7 个，顺序固定。
 - `nav-current`：逐个点击后 hash、`aria-current` 和 h1 三者一致。
 - `nav-rewrite`：`#/overview` 落到录音页；页面上不出现「概览」「导入新录音」。
 - `nav-diagnostics`：`#/settings/diagnostics` 高亮「设置」并展开 `details#diagnostics`；从别的页面进 `#/settings` 时默认折叠。

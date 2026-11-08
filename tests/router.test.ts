@@ -9,6 +9,8 @@ test('each nav page parses and round-trips', () => {
     { name: 'library', stage: 'ready' },
     { name: 'device' },
     { name: 'live' },
+    { name: 'today' },
+    { name: 'today', day: '2026-11-08' },
     { name: 'calendar' },
     { name: 'calendar', day: '2026-11-08' },
     { name: 'calendar', day: '2026-11-08', rec: 12 },
@@ -34,6 +36,7 @@ test('invalid query values are dropped instead of breaking the page', () => {
   assert.deepEqual(parseHash('#/library?stage=bogus'), { name: 'library' });
   assert.deepEqual(parseHash('#/calendar?day=11/08/2026&rec=x'), { name: 'calendar' });
   assert.deepEqual(parseHash('#/calendar?rec=5'), { name: 'calendar', rec: 5 });
+  assert.deepEqual(parseHash('#/today?day=bad'), { name: 'today' });
   assert.deepEqual(parseHash('#device'), { name: 'device' });
 });
 

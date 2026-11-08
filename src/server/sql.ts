@@ -120,34 +120,53 @@ export function finishJob(
   ]);
 }
 
-export const INTERRUPTED_TASK_MESSAGE = '上次处理因服务重启中断，可重新开始';
+export const INTERRUPTED_TASK_MESSAGE = '服务重启时中断，已自动重新排队';
 
 export interface RecoveryResult {
   recordings: number;
   jobs: number;
+  /** 需要重新入队的录音，按原排队顺序；转录会从检查点继续。 */
+  requeue: Array<{ recordingId: number; kind: 'transcribe' | 'organize' }>;
 }
 
-/** 将进程退出时遗留的持久化任务恢复为可重试状态。 */
+/**
+ * 收尾进程退出时遗留的任务：执行中的录音退回执行前的阶段并补写排队意图，
+ * 执行记录标 interrupted；返回全部排队意图供重新入队。重复执行结果不变。
+ */
 export function recoverInterruptedTasks(db: DatabaseSync): RecoveryResult {
   const timestamp = nowIso();
   db.exec('BEGIN IMMEDIATE');
   try {
+    run(
+      db,
+      `INSERT OR IGNORE INTO queued_tasks (recording_id, kind, queued_at)
+       SELECT id, CASE status WHEN 'transcribing' THEN 'transcribe' ELSE 'organize' END, ?
+         FROM recordings WHERE status IN ('transcribing', 'analyzing')`,
+      [timestamp],
+    );
     const recordings = run(
       db,
       `UPDATE recordings
-          SET status = 'failed', last_error = ?, updated_at = ?
+          SET status = CASE
+                WHEN status = 'analyzing' OR TRIM(COALESCE(transcript_text, '')) <> '' THEN 'transcribed'
+                ELSE 'ready' END,
+              last_error = NULL, last_error_code = NULL, last_error_detail = NULL, updated_at = ?
         WHERE status IN ('transcribing', 'analyzing')`,
-      [INTERRUPTED_TASK_MESSAGE, timestamp],
+      [timestamp],
     ).changes;
     const jobs = run(
       db,
       `UPDATE job_runs
-          SET status = 'failure', message = ?, finished_at = ?
+          SET status = 'interrupted', message = ?, finished_at = ?
         WHERE status = 'running'`,
       [INTERRUPTED_TASK_MESSAGE, timestamp],
     ).changes;
+    const requeue = rows(db, 'SELECT recording_id, kind FROM queued_tasks ORDER BY queued_at, rowid').map((item) => ({
+      recordingId: numOr(item.recording_id, 0),
+      kind: strOr(item.kind, 'transcribe') === 'organize' ? ('organize' as const) : ('transcribe' as const),
+    }));
     db.exec('COMMIT');
-    return { recordings, jobs };
+    return { recordings, jobs, requeue };
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;

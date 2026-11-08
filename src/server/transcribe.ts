@@ -1,4 +1,4 @@
-// ABOUTME: 把本地音频文件转成文本：ffmpeg 解码 PCM16，按 5 分钟分块送 Host ASR，上游中途失败时从最后确认的句子续传。
+// ABOUTME: 把本地音频文件转成文本：ffmpeg 解码 PCM16，按 5 分钟分块送 Host ASR，上游中途失败时从最后确认的句子续传；每块完成即落检查点，重试时跳过已完成块。
 
 import type { HostClient } from '../../sdk/host.mjs';
 import type { AsrStartInput } from '../../sdk/asr-contracts.mjs';
@@ -7,9 +7,25 @@ import { decodePcmFrames, PCM_BYTES_PER_SECOND } from './media';
 
 export interface TranscribeProgress {
   audioSentSec: number;
+  /** 从断点直接复用、没有再送识别的秒数。 */
+  resumedSec: number;
   segments: number;
   sessions: number;
   reconnects: number;
+}
+
+/** 一块已识别完成的音频；时间戳已按整段偏移校正。 */
+export interface ChunkCheckpoint {
+  index: number;
+  offsetMs: number;
+  endMs: number;
+  segments: TranscriptSegment[];
+}
+
+/** 断点存储：completed 为上次已完成的块；每识别完一块调用 save。 */
+export interface CheckpointSink {
+  completed: ReadonlyMap<number, ChunkCheckpoint>;
+  save: (chunk: ChunkCheckpoint) => void;
 }
 
 export interface TranscribeOptions {
@@ -18,6 +34,9 @@ export interface TranscribeOptions {
   diarization: boolean;
   hotwords: string[];
   language?: string;
+  checkpoint?: CheckpointSink;
+  /** 默认用 ffmpeg 解码；测试可换成假 PCM 源。 */
+  decode?: typeof decodePcmFrames;
   onProgress?: (progress: TranscribeProgress) => void;
 }
 
@@ -47,7 +66,9 @@ export class TranscribeError extends Error {
 }
 
 /** 单个识别会话承载的音频秒数；实测上游长会话会中途 ASR_UPSTREAM_FAILED，分块后失败只影响一块。 */
-const CHUNK_AUDIO_SEC = 300;
+export const CHUNK_AUDIO_SEC = 300;
+/** 单次转录送识别的耗时上限；从断点复用的块不计入。 */
+const MAX_ASR_MS = 60 * 60 * 1000;
 /** 每块最多尝试次数（首发 + 续传）。 */
 const MAX_CHUNK_ATTEMPTS = 4;
 /** 整次转录累计续传上限，超过视为上游不可用。 */
@@ -73,6 +94,16 @@ function errorCode(error: unknown): string {
     if (typeof code === 'string') return code;
   }
   return '';
+}
+
+/**
+ * Host 同时活动的识别会话已满（Host 以 429 拒绝，例如超过 8 个活动会话或会话历史过多）。
+ * Host 客户端不保留 HTTP 状态，只能按错误码判断；这类错误应排队重试，而不是把录音标失败。
+ */
+export function isCapacityError(error: unknown): boolean {
+  const code = errorCode(error);
+  if (/AUDIO_STORAGE/i.test(code)) return false;
+  return /SESSION_HISTORY_LIMIT|SESSIONS?_LIMIT|ACTIVE_[A-Z_]*LIMIT|LIMIT_EXCEEDED|CONCURREN|TOO_MANY|RATE_LIMIT|CAPACITY/i.test(code);
 }
 
 /** 会话已被上游终止，可以开新会话续传（而不是参数或权限类的硬错误）。 */
@@ -154,19 +185,32 @@ export async function transcribeAudioFile(host: HostClient, options: TranscribeO
   let sessions = 0;
   let reconnects = 0;
   let decodedBytes = 0;
+  let resumedMs = 0;
   let lastAsrError: string | null = null;
   let activeStream: string | null = null;
 
   const report = (live = 0) =>
     options.onProgress?.({
       audioSentSec: Math.round(decodedBytes / PCM_BYTES_PER_SECOND),
+      resumedSec: Math.round(resumedMs / 1000),
       segments: done.length + live,
       sessions,
       reconnects,
     });
 
+  const busy = (error: unknown) => {
+    note(trace, 'asr_busy', errorDetail(error));
+    return new TranscribeError('ASR_BUSY', `识别服务同时处理的会话已满：${describeStartError(error)}`, trace);
+  };
+
   const startStream = async (): Promise<string> => {
-    if (startInput) return (await host.asr.start(startInput)).streamId;
+    if (startInput) {
+      try {
+        return (await host.asr.start(startInput)).streamId;
+      } catch (error) {
+        throw isCapacityError(error) ? busy(error) : error;
+      }
+    }
     const failures: string[] = [];
     for (const candidate of startCandidates(options)) {
       try {
@@ -175,6 +219,7 @@ export async function transcribeAudioFile(host: HostClient, options: TranscribeO
         note(trace, 'start', { variant: candidate.label });
         return streamId;
       } catch (error) {
+        if (isCapacityError(error)) throw busy(error);
         failures.push(`${candidate.label}：${describeStartError(error)}`);
         note(trace, 'start_failed', { variant: candidate.label, ...errorDetail(error) });
         if ((error as { execution?: string } | null)?.execution === 'executed') break;
@@ -304,20 +349,41 @@ export async function transcribeAudioFile(host: HostClient, options: TranscribeO
     }
   };
 
-  const iterator = decodePcmFrames(options.ffmpegPath, options.filePath);
+  let chunkIndex = 0;
+  let asrMs = 0;
+  /** 断点里有同一位置的完成块就直接复用，否则送识别并落一个检查点。 */
+  const processChunk = async (frames: Buffer[], offsetMs: number): Promise<void> => {
+    const index = chunkIndex;
+    chunkIndex += 1;
+    const endMs = Math.round((decodedBytes / PCM_BYTES_PER_SECOND) * 1000);
+    const saved = options.checkpoint?.completed.get(index);
+    if (saved && saved.offsetMs === offsetMs && saved.endMs === endMs) {
+      done.push(...saved.segments);
+      resumedMs += endMs - offsetMs;
+      note(trace, 'chunk_resumed', { index, offsetSec: Math.round(offsetMs / 1000), segments: saved.segments.length });
+      report();
+      return;
+    }
+    if (asrMs > MAX_ASR_MS) throw new TranscribeError('TRANSCRIBE_TIMEOUT', '单次转录超过 60 分钟，已中止', trace);
+    const before = done.length;
+    const startedAt = Date.now();
+    await runChunk(frames, offsetMs);
+    asrMs += Date.now() - startedAt;
+    options.checkpoint?.save({ index, offsetMs, endMs, segments: done.slice(before) });
+  };
+
+  const iterator = (options.decode ?? decodePcmFrames)(options.ffmpegPath, options.filePath);
   const framesPerChunk = Math.max(1, Math.round(CHUNK_AUDIO_SEC / 2));
-  const deadline = Date.now() + 60 * 60 * 1000;
   let chunk: Buffer[] = [];
   let chunkOffsetMs = 0;
 
   try {
     let step = await iterator.next();
     while (!step.done) {
-      if (Date.now() > deadline) throw new TranscribeError('TRANSCRIBE_TIMEOUT', '单次转录超过 60 分钟，已中止', trace);
       chunk.push(step.value);
       decodedBytes += step.value.length;
       if (chunk.length >= framesPerChunk) {
-        await runChunk(chunk, chunkOffsetMs);
+        await processChunk(chunk, chunkOffsetMs);
         chunkOffsetMs = Math.round((decodedBytes / PCM_BYTES_PER_SECOND) * 1000);
         chunk = [];
       }
@@ -326,7 +392,7 @@ export async function transcribeAudioFile(host: HostClient, options: TranscribeO
     const decodeFailure = step.value;
     if (decodeFailure) throw new TranscribeError('DECODE_FAILED', `音频解码失败：${decodeFailure.message}`, trace);
     if (decodedBytes === 0) throw new TranscribeError('AUDIO_EMPTY', '解码后没有音频数据，请确认文件未损坏', trace);
-    if (chunk.length > 0) await runChunk(chunk, chunkOffsetMs);
+    if (chunk.length > 0) await processChunk(chunk, chunkOffsetMs);
   } catch (error) {
     await iterator.return(null).catch(() => undefined);
     if (activeStream) await host.asr.cancel({ streamId: activeStream }).catch(() => undefined);
@@ -335,7 +401,13 @@ export async function transcribeAudioFile(host: HostClient, options: TranscribeO
   }
 
   report();
-  note(trace, 'finished', { audioSec: Math.round(decodedBytes / PCM_BYTES_PER_SECOND), segments: done.length, sessions, reconnects });
+  note(trace, 'finished', {
+    audioSec: Math.round(decodedBytes / PCM_BYTES_PER_SECOND),
+    resumedSec: Math.round(resumedMs / 1000),
+    segments: done.length,
+    sessions,
+    reconnects,
+  });
 
   const text = done
     .map((segment) => segment.text)

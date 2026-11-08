@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { createWorkbenchServer } from '../sdk/runtime.mjs';
+import { TRANSCRIBE_LANE, laneLimit } from '../src/server/queue.ts';
 import { registerSettingRoutes } from '../src/server/routes/settings.ts';
 import { readSetting, readSettings, writeSetting } from '../src/server/sql.ts';
 
@@ -52,6 +53,14 @@ test('upgrade removes only sdk_dir; settings API tolerates stale clients', async
     assert.equal((await patch({ other_path: 'x' })).code, 'UNKNOWN_SETTING');
     assert.equal((await patch({ python_path: 'x'.repeat(501) })).code, 'INVALID_INPUT');
     assert.equal(readSetting(app.database, 'ffmpeg_path'), 'C:/tools/ffmpeg.exe');
+    // Parallel transcription: defaults to 3, accepts 1–8 and applies to the transcription lane at once.
+    assert.equal(readSetting(app.database, 'asr_concurrency'), '3');
+    assert.equal((await patch({ asr_concurrency: '9' })).code, 'INVALID_INPUT');
+    assert.equal((await patch({ asr_concurrency: '0' })).code, 'INVALID_INPUT');
+    assert.equal((await patch({ asr_concurrency: '2.5' })).code, 'INVALID_INPUT');
+    assert.equal((await patch({ asr_concurrency: ' 5 ' })).ok, true);
+    assert.equal(readSetting(app.database, 'asr_concurrency'), '5');
+    assert.equal(laneLimit(TRANSCRIBE_LANE), 5);
     // Even a stale value reintroduced outside the API must not leak into UI drafts.
     writeSetting(app.database, 'sdk_dir', 'stale');
     assert.equal(readSettings(app.database).has('sdk_dir'), false);

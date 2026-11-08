@@ -1,0 +1,17 @@
+[
+  {"goto":"#/today?day=2026-11-08"},
+  {"waitText":"还没有转录完成的录音"},
+  {"waitText":"还有 1 段录音没有转录"},
+  {"eval":"(() => { const h1 = document.querySelector('main h1')?.innerText.trim(); const current = document.querySelector('nav[aria-label=\"主导航\"] [aria-current=\"page\"]')?.querySelector('span')?.innerText.trim(); if (h1 !== '今日' || current !== '今日') throw Error('Expected 今日 page, got h1=' + h1 + ' nav=' + current); const button = [...document.querySelectorAll('main .page__actions button')].find((b) => b.innerText.trim() === '整理这一天'); if (!button || !button.disabled) throw Error('整理这一天 must be disabled without transcripts'); if (document.querySelector('[aria-label=\"场景时间线\"]')) throw Error('No timeline expected'); return { h1, current, disabled: button.disabled }; })()"},
+  {"screenshot":"01-empty-day.png"},
+  {"aria":"01-empty-day.aria.txt"},
+  {"eval":"(async () => { const r = await fetch('/api/scenes/rebuild', { method: 'POST', headers: { 'content-type': 'application/json', connection: 'close' }, body: JSON.stringify({ day: '2026-11-08' }) }); const body = await r.json(); if (body.ok || body.code !== 'INVALID_INPUT') throw Error('Rebuild without transcripts must be rejected: ' + JSON.stringify(body)); const day = await fetch('/api/scenes?day=2026-11-08', { headers: { connection: 'close' } }).then((x) => x.json()); if (!day.ok || day.data.status !== 'idle' || day.data.transcribedCount !== 0 || day.data.untranscribedCount !== 1 || day.data.scenes.length !== 0 || day.data.templates.length !== 5) throw Error('Unexpected scene day: ' + JSON.stringify(day)); return { rejected: body.code, day: day.data.status, templates: day.data.templates.map((t) => t.slug) }; })()"},
+  {"click":"aria=前一天"},
+  {"waitText":"还没有转录完成的录音"},
+  {"eval":"(() => { const input = document.querySelector('input[aria-label=\"选择日期\"]'); if (location.hash !== '#/today?day=2026-11-07' || input?.value !== '2026-11-07') throw Error('Day switch failed: ' + location.hash + ' ' + input?.value); if (document.body.innerText.includes('没有转录，转录完成后会自动整理')) throw Error('2026-11-07 has no recordings'); return location.hash; })()"},
+  {"screenshot":"02-previous-day.png"},
+  {"aria":"02-previous-day.aria.txt"},
+  {"goto":"#/today?day=bad"},
+  {"waitFor":"input[aria-label=\"选择日期\"]"},
+  {"eval":"(() => { const value = document.querySelector('input[aria-label=\"选择日期\"]').value; if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) throw Error('Invalid day should fall back to today, got ' + value); return value; })()"}
+]

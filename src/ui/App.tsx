@@ -1,7 +1,7 @@
-// ABOUTME: 工作台外壳：6 项侧栏导航、哈希路由与页面装配；每个功能只在一个页面里有入口。
+// ABOUTME: 工作台外壳：7 项侧栏导航、哈希路由与页面装配；每个功能只在一个页面里有入口。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AudioLines, CalendarDays, Captions, FolderTree, LibraryBig, Mic, Settings2 } from 'lucide-react';
+import { AudioLines, CalendarDays, Captions, FolderTree, LibraryBig, Mic, Settings2, Shell } from 'lucide-react';
 import { api } from './api';
 import type { AppInfo, Overview } from '../contracts/app';
 import type { EnvironmentState } from '../contracts/preflight';
@@ -15,10 +15,13 @@ import { LivePage } from './pages/Live';
 import { CategoriesPage } from './pages/Categories';
 import { SettingsPage } from './pages/Settings';
 import { CalendarPage } from './pages/Calendar';
+import { TodayPage } from './pages/Today';
+import './today.css';
 import './calendar.css';
 
 const NAV: ReadonlyArray<{ key: NavKey; label: string; icon: typeof Mic }> = [
   { key: 'library', label: '录音', icon: LibraryBig },
+  { key: 'today', label: '今日', icon: Shell },
   { key: 'device', label: '录音笔', icon: Mic },
   { key: 'live', label: '实时字幕', icon: Captions },
   { key: 'calendar', label: '日历', icon: CalendarDays },
@@ -119,6 +122,7 @@ export function App() {
           {route.name === 'library' ? (
             <LibraryPage stage={route.stage} overview={overview.data} envFailCount={envFailCount} onOpen={openRecording} onChanged={changed} />
           ) : null}
+          {route.name === 'today' ? <TodayPage day={route.day} /> : null}
           {route.name === 'device' ? <DevicePage envFailCount={envFailCount} onChanged={changed} /> : null}
           {route.name === 'live' ? <LivePage onOpen={openRecording} /> : null}
           {route.name === 'calendar' ? <CalendarPage day={route.day} rec={route.rec} /> : null}

@@ -5,16 +5,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { createWorkbenchServer } from '../sdk/runtime.mjs';
-import { enqueue } from '../src/server/queue.ts';
+import { NetworkGate } from '../src/server/network-gate.ts';
+import { useNetworkGate, whenIdle } from '../src/server/queue.ts';
 import { registerPipelineRoutes } from '../src/server/routes/pipeline.ts';
 import { registerRecordingRoutes } from '../src/server/routes/recordings.ts';
 
 test('HTTP enqueue exposes waiting tasks, rejects duplicates, and publishes terminal errors', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'openminutes-queue-'));
-  const blocker = Promise.withResolvers<void>();
-  const drained = Promise.withResolvers<void>();
+  // 网络闸门关着时转录/归类停在各自车道里，用来观察排队状态。
+  const gate = new NetworkGate();
+  useNetworkGate(gate);
+  const release = await gate.acquireOffline('test', { waitForInFlightMs: 1000 });
+  assert.ok(release);
   let close: (() => Promise<void>) | undefined;
-  let drainQueued = false;
   try {
     await cp(new URL('../migrations/', import.meta.url), path.join(root, 'migrations'), { recursive: true });
     await writeFile(path.join(root, 'manifest.json'), JSON.stringify({
@@ -44,7 +47,6 @@ test('HTTP enqueue exposes waiting tasks, rejects duplicates, and publishes term
     const post = async (route: string, body = {}) => (await fetch(`${url}${route}`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     })).json();
-    enqueue('test:blocker', () => blocker.promise);
     assert.equal((await post('/api/recordings/1/transcribe')).data.queued, true);
     assert.equal((await post('/api/recordings/2/organize')).data.queued, true);
     assert.equal((await get('/api/recordings/1')).data.recording.status, 'queued_transcribe');
@@ -71,10 +73,8 @@ test('HTTP enqueue exposes waiting tasks, rejects duplicates, and publishes term
 
     // Exercise the real pipeline's preflight failure without requiring ffmpeg or audio.
     app.database.exec('UPDATE recordings SET storage_path = NULL WHERE id IN (1, 3, 5)');
-    enqueue('test:drain', async () => drained.resolve());
-    drainQueued = true;
-    blocker.resolve();
-    await drained.promise;
+    release();
+    await whenIdle();
     for (const id of [1, 3, 5]) {
       const detail = (await get(`/api/recordings/${id}`)).data;
       assert.equal(detail.recording.status, 'failed');
@@ -91,9 +91,9 @@ test('HTTP enqueue exposes waiting tasks, rejects duplicates, and publishes term
     }
     assert.equal((await get('/api/recordings')).data.hasActiveTasks, false);
   } finally {
-    if (!drainQueued) enqueue('test:drain', async () => drained.resolve());
-    blocker.resolve();
-    await drained.promise;
+    release();
+    await whenIdle();
+    useNetworkGate(new NetworkGate());
     await close?.();
     await rm(root, { recursive: true, force: true });
   }

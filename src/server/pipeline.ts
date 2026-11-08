@@ -1,14 +1,17 @@
 // ABOUTME: 转录与归类的后台流水线：维护状态机、任务记录与失败可重试信息。
 
+import { stat } from 'node:fs/promises';
 import type { DatabaseSync } from 'node:sqlite';
 import type { HostClient } from '../../sdk/host.mjs';
 import { finishJob, num, nowIso, pruneTags, readSetting, row, run, startJob, str, strOr, touchRecording } from './sql';
-import { TranscribeError, transcribeAudioFile } from './transcribe';
+import { CHUNK_AUDIO_SEC, TranscribeError, transcribeAudioFile } from './transcribe';
+import { clearCheckpoints, openCheckpoints } from './transcribe-checkpoints';
 import { OrganizeError, organizeRecording } from './organize';
 import { resolveFfmpeg } from './runtime-probe';
 import { AppError, ERROR_COPY } from '../contracts/errors';
 import { toFailure } from './http';
 import { isBusyStatus } from '../contracts/recording-status';
+import { scheduleScenesForRecording } from './scenes/day';
 
 export { isBusyStatus } from '../contracts/recording-status';
 
@@ -16,11 +19,25 @@ export interface PipelineDeps {
   db: DatabaseSync;
   host: HostClient;
   resolveAudio: (storagePath: string) => Promise<string>;
+  /** 自动归类时把归类排进归类车道，释放转录名额；未提供时在转录任务内直接归类。 */
+  queueOrganization?: (recordingId: number) => void;
+  /** 测试替换 ffmpeg 定位与音频解码。 */
+  resolveFfmpeg?: typeof resolveFfmpeg;
+  decode?: Parameters<typeof transcribeAudioFile>[1]['decode'];
 }
 
 export interface PipelineResult {
   ok: boolean;
   message: string;
+  /** 识别服务繁忙：录音保持排队状态，调用方应在这么久之后重新排队。 */
+  retryAfterMs?: number;
+}
+
+/** 识别服务会话已满时最多自动重排的次数（间隔 5 秒递增到 1 分钟，约 25 分钟）。 */
+export const MAX_BUSY_ATTEMPTS = 30;
+
+export function busyRetryDelayMs(attempt: number): number {
+  return Math.min(60_000, 5_000 * Math.max(1, attempt));
 }
 
 export interface DescribedError {
@@ -88,9 +105,13 @@ function hotwords(db: DatabaseSync): string[] {
     .slice(0, 50);
 }
 
-/** 转录一条录音；失败时保留可重试状态与原因，不吞掉错误。 */
-export async function runTranscription(deps: PipelineDeps, recordingId: number): Promise<PipelineResult> {
+/**
+ * 转录一条录音；失败时保留可重试状态与原因，不吞掉错误。
+ * 每块识别完成即落检查点，再次转录时跳过已完成的块；识别服务会话已满时退回排队（retryAfterMs）。
+ */
+export async function runTranscription(deps: PipelineDeps, recordingId: number, options: { attempt?: number } = {}): Promise<PipelineResult> {
   const { db } = deps;
+  const attempt = options.attempt ?? 1;
   const recording = row(db, 'SELECT id, filename, storage_path, status, duration_sec FROM recordings WHERE id = ?', [recordingId]);
   if (!recording) return { ok: false, message: '录音不存在' };
   if (isBusyStatus(strOr(recording.status, ''))) return { ok: false, message: '该录音已有任务在执行' };
@@ -102,7 +123,7 @@ export async function runTranscription(deps: PipelineDeps, recordingId: number):
     return { ok: false, message };
   }
 
-  const ffmpegPath = await resolveFfmpeg(db);
+  const ffmpegPath = await (deps.resolveFfmpeg ?? resolveFfmpeg)(db);
   if (!ffmpegPath) {
     const failure = { code: 'RUNTIME_MISSING', message: '还没有找到音频处理工具，无法读取音频。', detail: 'ffmpeg not found; set ffmpeg_path in 设置 › 诊断与高级' };
     failRecording(db, recordingId, 'failed', failure);
@@ -113,17 +134,28 @@ export async function runTranscription(deps: PipelineDeps, recordingId: number):
 
   try {
     const absolute = await deps.resolveAudio(storagePath);
+    const diarization = settingOn(db, 'speaker_diarization');
+    const words = hotwords(db);
+    const source = await stat(absolute);
+    const checkpoint = openCheckpoints(db, recordingId, {
+      size: source.size,
+      mtimeMs: Math.floor(source.mtimeMs),
+      params: JSON.stringify({ chunkSec: CHUNK_AUDIO_SEC, diarization, hotwords: words }),
+    });
     const outcome = await transcribeAudioFile(deps.host, {
       filePath: absolute,
       ffmpegPath,
-      diarization: settingOn(db, 'speaker_diarization'),
-      hotwords: hotwords(db),
+      diarization,
+      hotwords: words,
+      checkpoint,
+      decode: deps.decode,
       onProgress: (progress) => {
         const total = num(recording.duration_sec);
         const sent = Math.round(progress.audioSentSec / 60);
         const head = total ? `已送识别 ${sent}/${Math.max(1, Math.round(total / 60))} 分钟` : `已送识别 ${sent} 分钟`;
+        const resumed = progress.resumedSec > 0 ? ` · 从上次进度继续（${Math.round(progress.resumedSec / 60)} 分钟已完成）` : '';
         const tail = progress.reconnects > 0 ? ` · 上游断线 ${progress.reconnects} 次已自动续传` : '';
-        run(db, 'UPDATE job_runs SET message = ? WHERE id = ?', [`${head} · 已识别 ${progress.segments} 句${tail}`, jobId]);
+        run(db, 'UPDATE job_runs SET message = ? WHERE id = ?', [`${head} · 已识别 ${progress.segments} 句${resumed}${tail}`, jobId]);
       },
     });
 
@@ -142,6 +174,7 @@ export async function runTranscription(deps: PipelineDeps, recordingId: number):
         nowIso(),
       ],
     );
+    clearCheckpoints(db, recordingId);
 
     const speakers = new Set(outcome.segments.map((segment) => segment.speaker).filter(Boolean)).size;
     const durationSec = num(recording.duration_sec) ?? Math.max(1, Math.round(outcome.audioMs / 1000));
@@ -163,11 +196,19 @@ export async function runTranscription(deps: PipelineDeps, recordingId: number):
     });
 
     if (settingOn(db, 'auto_analyze')) {
-      await runOrganization(deps, recordingId);
+      if (deps.queueOrganization) deps.queueOrganization(recordingId);
+      else await runOrganization(deps, recordingId);
     }
+    scheduleScenesForRecording(db, deps.host, recordingId);
     return { ok: true, message: '转录完成' };
   } catch (error) {
     const failure = describeError(error, 'transcribe');
+    if (failure.code === 'ASR_BUSY' && attempt < MAX_BUSY_ATTEMPTS) {
+      // 已完成的块都在检查点里；退回执行前的状态，由调用方稍后重新排队。
+      touchRecording(db, recordingId, { status: strOr(recording.status, 'ready'), last_error: null, last_error_code: null, last_error_detail: null });
+      finishJob(db, jobId, 'interrupted', '识别服务繁忙，稍后自动继续', { code: failure.code, detail: failure.detail, attempt });
+      return { ok: false, message: '识别服务繁忙，已重新排队', retryAfterMs: busyRetryDelayMs(attempt) };
+    }
     failRecording(db, recordingId, 'failed', failure);
     const trace = (error as { trace?: { events: unknown[] } } | null)?.trace?.events;
     console.error(`[transcribe] recording ${recordingId} failed: ${failure.code} ${failure.detail ?? failure.message}`);

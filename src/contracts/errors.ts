@@ -32,6 +32,7 @@ export const ERROR_COPY: Record<string, { message: string; action?: ErrorAction 
   ASR_START_FAILED: { message: '语音识别暂时不可用，请确认已在 Floatboat 登录并开启语音识别。' },
   ASR_UNSTABLE: { message: '识别服务连接不稳定，进度已保存，可以稍后重试。' },
   ASR_EMPTY: { message: '没有识别到可用的语音内容，请确认录音里有人声。' },
+  ASR_BUSY: { message: '识别服务一直繁忙，进度已保存，可以稍后重试。' },
   DECODE_FAILED: { message: '音频文件无法读取，可能已损坏。' },
   LLM_UNAVAILABLE: { message: 'AI 整理暂不可用，请在 Floatboat 中登录并选择模型。' },
   LLM_INCOMPLETE: { message: 'AI 整理没有完成，请重试。' },

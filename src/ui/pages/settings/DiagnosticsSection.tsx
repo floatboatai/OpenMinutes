@@ -1,4 +1,4 @@
-// ABOUTME: 设置 › 诊断与高级：全应用唯一的技术细节区（本机环境、运行时路径、传输方式、设备操作记录、宿主能力、协议指令与开发者工具）。
+// ABOUTME: 设置 › 诊断与高级：全应用唯一的技术细节区（本机环境、运行时路径、转录并行数、传输方式、设备操作记录、宿主能力、协议指令与开发者工具）。
 
 import { useEffect, useRef, useState } from 'react';
 import { Copy } from 'lucide-react';
@@ -92,6 +92,21 @@ function DiagnosticsBody({ value, update }: Omit<Props, 'focus'>) {
         </Field>
         <Field label="ffmpeg 路径" hint="留空时使用 Floatboat 内置 ffmpeg；转录依赖它解码音频">
           <input value={value('ffmpeg_path')} placeholder="ffmpeg" onChange={(event) => update('ffmpeg_path', event.target.value)} />
+        </Field>
+      </section>
+
+      <section className="diag__section">
+        <h3>转录任务</h3>
+        <Field label="同时转录的录音数" hint="1–8，默认 3。调大处理更快，但更容易遇到识别服务繁忙（会自动排队重试）；保存后对之后开始的转录生效">
+          <input
+            type="number"
+            min={1}
+            max={8}
+            aria-label="同时转录的录音数"
+            value={value('asr_concurrency')}
+            placeholder="3"
+            onChange={(event) => update('asr_concurrency', event.target.value)}
+          />
         </Field>
       </section>
 

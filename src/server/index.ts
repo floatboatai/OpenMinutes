@@ -14,17 +14,21 @@ import { registerLiveRoutes } from './routes/live';
 import { registerMediaRoutes } from './routes/media';
 import { registerPipelineRoutes } from './routes/pipeline';
 import { registerRecordingRoutes } from './routes/recordings';
+import { registerSceneRoutes } from './routes/scenes';
 import { registerSettingRoutes } from './routes/settings';
 import { recoverInterruptedTasks } from './sql';
 import { registerEnvironmentRoutes } from './routes/environment';
+import { applyAsrConcurrency, resumeQueuedTasks } from './jobs';
 
 const app = await createWorkbenchServer(import.meta.url);
 
-recoverInterruptedTasks(app.database);
+const recovery = recoverInterruptedTasks(app.database);
+applyAsrConcurrency(app.database);
 registerAppRoute(app);
 registerRecordingRoutes(app);
 registerCalendarRoutes(app);
 registerPipelineRoutes(app);
+registerSceneRoutes(app);
 registerCategoryRoutes(app);
 registerIngestRoutes(app);
 registerMediaRoutes(app);
@@ -49,4 +53,5 @@ registerSettingRoutes(app);
 
 startAutoConnect({ db: app.database, service: device });
 await app.listen();
+resumeQueuedTasks(app, recovery.requeue);
 void preflight.get().catch((error) => console.error('preflight failed', error));
