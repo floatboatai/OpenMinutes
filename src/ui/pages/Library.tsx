@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { FolderDown, Search, Sparkles, Star, Waves } from 'lucide-react';
-import type { BatchResult, Category, Overview, RecordingListResult, RecordingSummary } from '../../contracts/app';
+import type { BatchResult, Category, Overview, RecordingListResult, RecordingSummary, RevealResult } from '../../contracts/app';
 import { api } from '../api';
 import { formatDateTime, formatDuration } from '../format';
 import { buildHash, type LibraryStage } from '../router';
@@ -121,6 +121,16 @@ export function LibraryPage({ stage: routeStage, overview, envFailCount, onOpen,
       toast.error(error);
     } finally {
       setBusy(false);
+    }
+  };
+
+  // 打开录音所在文件夹的唯一入口；打开方式由设置「打开录音所在文件夹」决定。
+  const reveal = async (item: RecordingSummary) => {
+    try {
+      const result = await api.post<RevealResult>(`/api/recordings/${item.id}/reveal`);
+      toast.push(`已${result.mode === 'explorer' ? '在资源管理器中' : '在 Floatboat 中'}打开 ${result.folder}`, 'success');
+    } catch (error) {
+      toast.error(error);
     }
   };
 
@@ -271,6 +281,7 @@ export function LibraryPage({ stage: routeStage, overview, envFailCount, onOpen,
               />
             </span>
             <span>录音</span>
+            <span className="col-location">位置</span>
             <span className="col-category">分类</span>
             <span className="col-tags">标签</span>
             <span className="col-duration">时长</span>
@@ -285,6 +296,7 @@ export function LibraryPage({ stage: routeStage, overview, envFailCount, onOpen,
                 checked={selected.includes(item.id)}
                 onToggle={() => toggle(item.id)}
                 onOpen={() => onOpen(item.id)}
+                onReveal={() => void reveal(item)}
               />
             ))}
           </ul>
@@ -307,16 +319,23 @@ export function LibraryPage({ stage: routeStage, overview, envFailCount, onOpen,
   );
 }
 
+/** 过长的文件夹保留末尾（月份目录最有信息量），完整路径放在 title。 */
+function shortFolder(label: string, max = 24): string {
+  return label.length > max ? `…${label.slice(label.length - max + 1)}` : label;
+}
+
 function Row({
   item,
   checked,
   onToggle,
   onOpen,
+  onReveal,
 }: {
   item: RecordingSummary;
   checked: boolean;
   onToggle: () => void;
   onOpen: () => void;
+  onReveal: () => void;
 }) {
   return (
     <li className={`row${checked ? ' row--checked' : ''}`}>
@@ -334,6 +353,24 @@ function Row({
           {item.hasAudioFile || item.status === 'pending' ? '' : ' · 缺音频文件'}
         </span>
       </button>
+      <span className="col-location">
+        {item.location === 'local' ? (
+          <button
+            type="button"
+            className="location-link"
+            title={item.folderPath ? `打开所在文件夹：${item.folderPath}` : '打开所在文件夹'}
+            aria-label={`打开所在文件夹${item.folderLabel ? `：${item.folderLabel}` : ''}`}
+            onClick={onReveal}
+          >
+            <span className="location-link__kind">本机</span>
+            {item.folderLabel ? <span className="location-link__path">{shortFolder(item.folderLabel)}</span> : null}
+          </button>
+        ) : item.location === 'device' ? (
+          <span className="muted">录音笔</span>
+        ) : (
+          <span className="muted">—</span>
+        )}
+      </span>
       <span className="col-category">
         {item.categoryName ? (
           <span className="category-inline">

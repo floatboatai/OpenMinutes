@@ -59,8 +59,25 @@ export interface RecordingSummary {
   isArchived: boolean;
   transcriptChars: number;
   hasAudioFile: boolean;
+  /** device = 在录音笔中；local = 音频在本机；none = 没有音频文件。 */
+  location: RecordingLocation;
+  /** 本机所在文件夹的完整路径；历史相对文件名无法在列表里解析时为 null。 */
+  folderPath: string | null;
+  /** 文件夹的 ~ 简写，用于列表展示。 */
+  folderLabel: string | null;
   deviceSerial: string | null;
   tags: TagRef[];
+}
+
+export type RecordingLocation = 'device' | 'local' | 'none';
+
+/** 设置 `open_folder_with`：在 Floatboat 中打开，或用系统文件管理器打开。 */
+export type OpenFolderWith = 'floatboat' | 'explorer';
+
+export interface RevealResult {
+  mode: OpenFolderWith;
+  /** 实际打开的文件夹（~ 简写）。 */
+  folder: string;
 }
 
 export interface TranscriptRecord {

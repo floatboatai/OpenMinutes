@@ -81,3 +81,10 @@
 - 导入对话框的「扫描并导入」在目录读回之前是禁用的，配方里直接 `click` 会静默无效，随后 `waitText 已导入` 超时。点击前先 `{"waitText":"个音频文件"}`。
 - 设备 e2e 配方共享一台假录音笔：在跑过 `device-connection` 的 run 上再跑 `live-busy`，文件已经同步完，同步瞬间结束，报 `Live page did not block 开始 while syncing`。每个设备配方都 cleanup 后用新的 runId 重新 launch。
 - 验证某个回归测试是否真能抓住旧 bug 时，用脚本把旧代码临时换回去跑一次，确认失败后立刻换回来，再 `grep` 核对源码已恢复。时序类竞态要在测试里人为制造窗口（例如 prelude 里让占锁的命令 sleep），否则旧代码也会碰巧通过。
+- `gh pr merge --merge` 和 `--squash` 在本仓库都会报 `Merge commits are not allowed` / `Squash merges are not allowed`（远端只允许 rebase 合并）。直接用 `gh pr merge <n> --rebase`，合并后用 `git rev-parse origin/main^{tree}` 和本地提交的 tree 比对，确认内容一致（2026-11-08 PR #13）。
+- `pnpm test:ci` 第一步 `check-test-dependencies.mjs` 要求先设置 `MEMOTALK_TEST_PYTHON`，没设置就报错退出，后面的测试一个都不跑。没有 SDK 环境时，分别跑 `pnpm test`（SDK 集成用例会自动跳过）和 `pnpm test:verification`。
+- Bash 工具会保留上一条命令里 `cd` 进去的目录：在 `.claude/skills/verify-openminutes` 里执行过 `cd`，下一条命令里的 `src/...` 相对路径就全部 `No such file or directory`。跨目录操作时，每条命令开头都写 `cd "<仓库根的绝对路径>" &&`。
+- 场景（拾贝）的提示词里带有全部模板说明，社交模板的 `when` 本身就含“加个微信”。单测里的假 Host 按关键词分流调用时，要用转录里才有的词（例如人名），不能用模板说明里出现过的词，否则所有窗口都会走同一个分支。
+- 不要对仓库外的上级目录递归 grep（例如 `grep -rln ... ../../../`）：会扫到整个用户目录，命令超时转后台，连 TaskStop 都卡住。查宿主 SDK 直接去 `C:/Program Files/Floatboat/resources/workbench-sdk/`（本机 `AppData/Local/Programs/Floatboat` 下没有 resources）；Host 实现在 `app.asar` 里，用 `rg -a` 搜。
+- `pnpm test`（node:test）的汇总行是 `ℹ tests N` / `ℹ fail N`，不是 TAP 的 `# tests`；用 `grep '^# fail'` 过滤会得到空输出，被误读成没跑。先把输出存到 `.workbench/*.log`，看退出码，再 grep `^ℹ`。
+- 多个 agent 同时改同一个工作区时，`build.mjs` 可能读到别人改了一半的文件而报 `No matching export`，doctor 也会报 `dist/ is older than src/`。先确认报错文件是不是自己改的，不是就等对方完成后重跑，不要去改别人的文件。

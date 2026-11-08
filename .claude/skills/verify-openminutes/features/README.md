@@ -26,16 +26,19 @@
 
 ## 功能
 
-导航固定 6 项：录音 / 录音笔 / 实时字幕 / 日历 / 分类 / 设置，每个功能只有一个入口（入口速查见 SKILL.md「Drive」）。
+导航固定 7 项：录音 / 今日 / 录音笔 / 实时字幕 / 日历 / 分类 / 设置，每个功能只有一个入口（入口速查见 SKILL.md「Drive」）。
 
 - [目录导入](./directory-import.md)：录音页头「导入」对话框，扫描收件目录、复制入库并去重。
 - [录音库检索](./library-search.md)：全文搜索、阶段/分类/标签筛选、排序和空结果。
+- [录音位置列](./library-location.md)：列表「位置」列（录音笔 / 本机 + 文件夹）与点击打开所在文件夹（在 Floatboat 中 / 资源管理器）。
 - [录音详情](./recording-detail.md)：面包屑与返回、单一主按钮、Range 播放、改标题、改分类/重要度/标签、收藏、导出、删除、只读日程区。
-- [导航与单一入口](./navigation.md)：6 项导航、`aria-current` 与 h1 一致、`#/overview` 改写、主界面无技术词。
+- [今日：场景时间线](./scenes-today.md)：转录后自动切场景并按模板整理、时间线与卡片联动、空状态与日期切换。
+- [导航与单一入口](./navigation.md)：7 项导航、`aria-current` 与 h1 一致、`#/overview` 改写、主界面无技术词。
 - [录音笔](./device-connection.md)（只用 `--fake-device`）：点一次「连接」即同步、过程中「暂时断开外网」、诊断里的「无线快传」记录、「清理已同步的录音」、「断开连接」后自动连接暂停；`ble` 模式「已改用蓝牙」；同步中实时字幕被禁用。
 - [错误分两层](./error-detail.md)：`absent` 模式「没有找到录音笔」，「查看详情」或 toast「详情」后才出现 `DeviceNotFound`。
 - [录音与日程关联](./calendar-link.md)：详情页跳到日历、EventLinker 展开、一键关联、每条录音一个关联控件、详情只读。
 - [诊断与高级](./diagnostics.md)：`#/settings/diagnostics` 自动展开，含本机环境、运行时路径、传输方式、最近设备操作、宿主能力、设备协议指令参考、开发者工具；修改 `device_transport` 后用 `/api/settings` 读回。
+- [同时转录的录音数](./asr-concurrency.md)：诊断区「转录任务」里的 `asr_concurrency`（1–8，默认 3），保存读回、越界拒绝、改回默认。
 - [分类管理](./categories.md)：新建、改名、改色、删除，内置分类不可删。
 - [转录与归类](./transcribe-organize.md)：复用 Floatboat Host 验证单条、批量、人工修正与全文检索；显式无 Host 验证失败。
 - [转录与归类成功路径](./transcribe-success.md)：可选语言的离线 TTS、能力完整性检查和单条/批量 JSON 配方。

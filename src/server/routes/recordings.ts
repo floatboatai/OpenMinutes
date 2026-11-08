@@ -3,13 +3,14 @@
 import { mkdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import type { WorkbenchServer } from '../../../sdk/runtime.mjs';
-import type { RecordingDetail, RecordingListResult } from '../../contracts/app';
+import type { RecordingDetail, RecordingListResult, RevealResult } from '../../contracts/app';
 import { asObject, BadInput, optBool, optInt, optString, optStringArray, pathParam } from '../../contracts/input';
 import { api } from '../http';
 import { listRecordings, readRecordingDetail } from '../repo';
 import { pruneTags, readTags, row, run, str, syncTags } from '../sql';
 import { libraryRoot, resolveAudioFile } from '../library';
 import { linkCalendarRecording } from '../calendar';
+import { revealRecording } from '../reveal';
 
 export function registerRecordingRoutes(app: WorkbenchServer): void {
   app.route(
@@ -94,6 +95,17 @@ export function registerRecordingRoutes(app: WorkbenchServer): void {
       if (!detail) throw Object.assign(new Error('录音不存在'), { code: 'NOT_FOUND' });
       return detail;
     }),
+  );
+
+  // 打开录音所在文件夹的唯一入口（录音列表「位置」列）；只接受录音 id，路径由服务端解析。
+  app.route(
+    'POST',
+    '/api/recordings/:id/reveal',
+    api((context): Promise<RevealResult> => revealRecording(context.database, pathParam(context.params, 'id'), {
+      host: app.host,
+      resolve: (storagePath) => resolveAudioFile(app, storagePath),
+      fakeLog: process.env.OPENMINUTES_FAKE_REVEAL || undefined,
+    })),
   );
 
   app.route(

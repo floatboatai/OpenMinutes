@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { AppError } from '../src/contracts/errors.ts';
 import { NetworkGate } from '../src/server/network-gate.ts';
-import { enqueue, isNetworkTask, useNetworkGate } from '../src/server/queue.ts';
+import { enqueue, isNetworkTask, useNetworkGate, whenIdle } from '../src/server/queue.ts';
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
 
-test('isNetworkTask only covers transcription and organisation', () => {
+test('isNetworkTask only covers transcription, organisation and scene days', () => {
   assert.equal(isNetworkTask('transcribe:1'), true);
   assert.equal(isNetworkTask('organize:2'), true);
+  assert.equal(isNetworkTask('scenes:2026-11-08'), true);
   assert.equal(isNetworkTask('scan:inbox'), false);
   assert.equal(isNetworkTask('device:sync'), false);
 });
@@ -33,14 +34,15 @@ test('while offline, queued network tasks wait in order and other tasks keep run
       order.push('scan:inbox');
       done.resolve();
     });
+    await done.promise;
     await tick();
-    // The serial queue holds behind the first network task; nothing has failed.
-    assert.deepEqual(order, []);
+    // Each kind has its own lane: network tasks wait for the gate, nothing has failed, other lanes keep running.
+    assert.deepEqual(order, ['scan:inbox']);
     assert.throws(() => gate.assertOnline(), (error: unknown) => error instanceof AppError && error.code === 'NETWORK_PAUSED');
     release();
     release(); // idempotent
-    await done.promise;
-    assert.deepEqual(order, ['transcribe:1', 'organize:1', 'scan:inbox']);
+    await whenIdle();
+    assert.deepEqual(order, ['scan:inbox', 'transcribe:1', 'organize:1']);
     assert.equal(gate.isOffline(), false);
     gate.assertOnline();
   } finally {

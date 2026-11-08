@@ -3,10 +3,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { isBusyStatus } from '../src/contracts/recording-status.ts';
-import { enqueue } from '../src/server/queue.ts';
+import { NetworkGate } from '../src/server/network-gate.ts';
+import { enqueue, useNetworkGate, whenIdle } from '../src/server/queue.ts';
 import { listRecordings, readRecordingDetail } from '../src/server/repo.ts';
 
-test('queued recordings remain observable until the serial queue settles', async () => {
+test('queued recordings remain observable until their lanes settle', async () => {
   const db = new DatabaseSync(':memory:');
   const migrations = new URL('../migrations/', import.meta.url);
   for (const name of readdirSync(migrations).filter((name) => name.endsWith('.sql')).sort()) {
@@ -17,16 +18,17 @@ test('queued recordings remain observable until the serial queue settles', async
       (1, 'first.mp3', 'first', 'ready'),
       (2, 'second.mp3', 'second', 'transcribed');
   `);
-  const blocker = Promise.withResolvers<void>();
-  const drained = Promise.withResolvers<void>();
-  enqueue('test:blocker', () => blocker.promise);
+  // 用网络闸门挡住任务：转录、归类各有车道，没有全局串行可借用。
+  const gate = new NetworkGate();
+  useNetworkGate(gate);
+  const release = await gate.acquireOffline('test', { waitForInFlightMs: 1000 });
+  assert.ok(release);
   enqueue('transcribe:1', async () => {
     db.exec("UPDATE recordings SET status = 'failed', last_error = 'HOST_NOT_CONNECTED' WHERE id = 1");
   });
   enqueue('organize:2', async () => {
     db.exec("UPDATE recordings SET status = 'organized' WHERE id = 2");
   });
-  enqueue('test:drain', async () => drained.resolve());
   try {
     assert.equal(readRecordingDetail(db, 1)?.recording.status, 'queued_transcribe');
     assert.equal(readRecordingDetail(db, 2)?.recording.status, 'queued_organize');
@@ -38,8 +40,8 @@ test('queued recordings remain observable until the serial queue settles', async
     assert.equal(readRecordingDetail(db, 1)?.recording.status, 'transcribing');
     assert.equal(readRecordingDetail(db, 2)?.recording.status, 'analyzing');
 
-    blocker.resolve();
-    await drained.promise;
+    release();
+    await whenIdle();
     assert.equal(readRecordingDetail(db, 1)?.recording.status, 'failed');
     assert.equal(readRecordingDetail(db, 1)?.lastError, 'HOST_NOT_CONNECTED');
     assert.equal(readRecordingDetail(db, 2)?.recording.status, 'organized');
@@ -49,8 +51,9 @@ test('queued recordings remain observable until the serial queue settles', async
     db.exec("UPDATE recordings SET status = 'transcribed', last_error = 'HOST_NOT_CONNECTED' WHERE id = 2");
     assert.equal(listRecordings(db, {}).hasActiveTasks, false);
   } finally {
-    blocker.resolve();
-    await drained.promise;
+    release();
+    await whenIdle();
+    useNetworkGate(new NetworkGate());
     db.close();
   }
 });
@@ -65,10 +68,8 @@ test('polling includes both queued kinds and stops for every terminal status', (
 });
 
 test('rejected tasks are removed and do not leave polling enabled', async () => {
-  const drained = Promise.withResolvers<void>();
   enqueue('transcribe:99', async () => { throw new Error('test failure'); });
-  enqueue('test:drain', async () => drained.resolve());
-  await drained.promise;
+  await whenIdle();
   const { hasRecordingTasks, queuedRecordingStatus } = await import('../src/server/queue.ts');
   assert.equal(queuedRecordingStatus(99), null);
   assert.equal(hasRecordingTasks(), false);

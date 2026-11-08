@@ -73,6 +73,8 @@ export function SettingsPage({ section }: { section?: 'diagnostics' }) {
       for (const field of [...AUTOMATION_FLAGS, ...RECOGNITION_FLAGS]) values[field.key] = value(field.key) === '1' ? '1' : '0';
       values.auto_connect_minutes = value('auto_connect_minutes') || '3';
       values.device_transport = value('device_transport') || 'auto';
+      values.asr_concurrency = value('asr_concurrency') || '3';
+      values.open_folder_with = value('open_folder_with') || 'floatboat';
       values.asr_hotwords = value('asr_hotwords');
       values.asr_language = value('asr_language');
       await api.patch('/api/settings', { values });
@@ -122,6 +124,16 @@ export function SettingsPage({ section }: { section?: 'diagnostics' }) {
               <input value={value(field.key)} placeholder={field.placeholder} onChange={(event) => update(field.key, event.target.value)} />
             </Field>
           ))}
+          <Field label="打开录音所在文件夹" hint="点录音列表「位置」列里的本机文件夹时使用">
+            <select
+              value={value('open_folder_with') || 'floatboat'}
+              onChange={(event) => update('open_folder_with', event.target.value)}
+              aria-label="打开录音所在文件夹"
+            >
+              <option value="floatboat">在 Floatboat 中打开</option>
+              <option value="explorer">在 Windows 资源管理器中打开</option>
+            </select>
+          </Field>
         </Card>
 
         <Card title="自动化">
