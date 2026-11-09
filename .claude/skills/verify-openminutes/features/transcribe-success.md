@@ -95,9 +95,9 @@ node "$S/make-voice.mjs" --output "$R/inbox/REC20261029_150200.mp3"
 node "$S/browse.mjs" voice-success-20261029 batch-success "@$F/batch-success.steps.json"
 ```
 
-每条命令成功后才执行下一条。脚本扫描新增两条，进入录音库精确勾选这两个文件（不全选已有成功录音），点击「批量转录」，等待「已排队 2 条转录任务」。它不刷新页面、不重新导航，按 `.table__body .row .col-status` 等待两行自动变为「待归类」，而非等待工具栏始终存在的文字。
+每条命令成功后才执行下一条。脚本扫描新增两条，进入录音库精确勾选这两个文件（不全选已有成功录音），点击「批量转录」，等待当前界面提示「已开始转录 2」。它不刷新页面、不重新导航，按 `.table__body .row .col-status` 等待两行自动变为「待归类」，而非等待工具栏始终存在的文字。
 
-转录完成后重新勾选这两行，点击「批量归类」，等「已排队 2 条归类任务」，仍在同一页面等三行都成为「已整理」。每阶段最多等 120 秒。`01-selected`、`02-transcribe-accepted`、`03-transcribed`、`04-organize-accepted`、`05-organized` 各保留 PNG/ARIA。
+转录完成后重新勾选这两行，点击「批量归类」，等「已开始归类 2」并仍在同一页面等三行都成为「已整理」。每阶段最多等 120 秒。`01-selected`、`02-transcribe-accepted`、`03-transcribed`、`04-organize-accepted`、`05-organized` 各保留 PNG/ARIA。
 
 读回 `/api/recordings`，两阶段终态都要求 `hasActiveTasks=false`；分别 GET 两个新 id，转录后要求 `status=transcribed`、`transcriptChars>0`、全文含「评审」、`segments` 非空、转录 job 成功。归类后要求 `status=organized` 及第 3 节字段表的完整断言。脚本保留列表与详情响应于 `steps.log`，人工再按表核对模型语义、分类 slug 和字段一致性，并保存各 id 的 `detail-<id>.json`。
 

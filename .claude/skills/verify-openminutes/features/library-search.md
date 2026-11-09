@@ -11,7 +11,7 @@
 - `library-sort`：「排序方式」可选最近入库、录音时间、时长最长、重要度高。
 - `library-auto-refresh`：有排队或进行中的任务时（`/api/recordings` 返回 `hasActiveTasks: true`），列表会自动刷新到终态，然后停止轮询。配方见 [转录与归类](./transcribe-organize.md) 的「批量转录自动刷新」。
 - `library-empty`：实例里一条录音都没有时，显示「还没有录音」。
-- `library-batch-all`：只有「待转录」或「待归类」阶段是唯一筛选条件时，才出现「全部转录（N）」/「全部归类（N）」。N 取 `/api/overview` 的同口径阶段计数（不含已归档）。加了搜索、分类或标签后，按钮隐藏，因为服务端只按阶段选录音。配方：`--no-host` 启动，收件目录放一个 MP3，运行 `browse.mjs <runId> library-batch-all @.claude/skills/verify-openminutes/features/library-batch-all.steps.json`（不点按钮，不发起转录）。
+- `library-batch-all`：只有「待转录」或「待归类」阶段是唯一筛选条件时，才出现「全部转录（N）」/「全部归类（N）」；N 取 `/api/overview` 的同口径阶段计数，但最多显示和处理 400 条。加了搜索、分类或标签后，按钮隐藏，因为服务端只按阶段选录音。配方：`--no-host` 启动，收件目录放一个 MP3，运行 `browse.mjs <runId> library-batch-all @.claude/skills/verify-openminutes/features/library-batch-all.steps.json`（不点按钮，不发起转录）。
 
 ## How to get to it (user POV)
 
