@@ -104,6 +104,11 @@ test('intent is committed before start; response lost across disposal recovers b
     assert.equal(input.idempotencyKey, key);
     return { runId: 'accepted', status: 'running', sessionId: 's', workspaceId: 'w', createdAt: 1, completedAt: null, text: '', errorCode: null };
   };
+  // 恢复出 runId 后，后续轮询改用 get；不桩它的话 5ms 后状态就变成 unknown，断言能否看到 running 全凭时机。
+  host.agent.get = async ({ runId }) => {
+    assert.equal(runId, 'accepted');
+    return { runId, status: 'running', sessionId: 's', workspaceId: 'w', createdAt: 1, completedAt: null, text: '', errorCode: null };
+  };
   const options = { host, store, workingDirectory: '/app', pollMs: 5, report: async () => report };
   const first = createEnvironmentRepair(options);
   const submitted = first.start();
@@ -115,6 +120,9 @@ test('intent is committed before start; response lost across disposal recovers b
     await submitted;
     await second.start();
     await waitFor(() => second.get().status === 'running');
+    // 再跑几轮轮询，确认恢复后保持 running，而不是一闪而过。
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(second.get().status, 'running');
     assert.equal(starts, 1);
     assert.ok('runId' in second.get() && store.load().status === 'running');
   } finally {
