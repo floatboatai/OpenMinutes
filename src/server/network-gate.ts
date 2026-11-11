@@ -61,8 +61,8 @@ export class NetworkGate {
           this.idleWaiters = this.idleWaiters.filter((waiter) => waiter !== done);
           resolve(value);
         };
+        // 不 unref：超时是这个等待的结束途径之一，finish 会清掉它。
         const timer = setTimeout(() => finish(false), options.waitForInFlightMs);
-        timer.unref?.();
         const done = () => finish(true);
         const onAbort = () => finish(false);
         options.signal?.addEventListener('abort', onAbort, { once: true });

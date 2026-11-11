@@ -167,7 +167,6 @@ export function attachWorker(child: ChildProcessWithoutNullStreams): WorkerHandl
           pending.delete(id);
           reject(new AppError('DEVICE_TIMEOUT', undefined, `worker command ${cmd} exceeded ${options.timeoutMs}ms`));
         }, options.timeoutMs);
-        timer.unref?.();
         pending.set(id, { cmd, resolve: resolve as (value: unknown) => void, reject, onEvent: options.onEvent, timer });
         send({ id, cmd, args });
       });

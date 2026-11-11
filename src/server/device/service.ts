@@ -667,13 +667,14 @@ export class DeviceService {
     this.abort?.abort();
     this.worker?.cancel();
     const timeout = options.timeoutMs ?? (activity.transport === 'wifi' ? HOTSPOT_CANCEL_WAIT_MS : BLE_CANCEL_WAIT_MS);
+    let timer: NodeJS.Timeout | undefined;
     const timedOut = await Promise.race([
       this.activityDone.then(() => false),
       new Promise<true>((resolve) => {
-        const timer = setTimeout(() => resolve(true), timeout);
-        timer.unref?.();
+        timer = setTimeout(() => resolve(true), timeout);
       }),
     ]);
+    clearTimeout(timer);
     if (timedOut && !waitingNetwork && this.worker && !this.worker.exited) this.worker.kill();
     await this.activityDone.catch(() => undefined);
     return this.view();
