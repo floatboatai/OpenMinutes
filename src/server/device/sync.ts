@@ -275,9 +275,8 @@ export async function runSync(rt: SyncRuntime, options: { ids?: number[] } = {})
       durationMs: Date.now() - started, detail: stalled.detail ?? '' });
     rt.cancelWorker?.();
     killTimer = setTimeout(() => rt.killWorker?.(), rt.cancelGraceMs?.() ?? 15_000);
-    killTimer.unref?.();
   }, Math.max(10, Math.min(5_000, Math.floor(stallMs / 4))));
-  watchdog.unref?.();
+  // 看门狗和强杀是卡住的拉取唯一的结束途径，不能 unref；stopWatchdog 负责清理。
   const stopWatchdog = () => {
     clearInterval(watchdog);
     if (killTimer) clearTimeout(killTimer);

@@ -88,3 +88,4 @@
 - 不要对仓库外的上级目录递归 grep（例如 `grep -rln ... ../../../`）：会扫到整个用户目录，命令超时转后台，连 TaskStop 都卡住。查宿主 SDK 直接去 `C:/Program Files/Floatboat/resources/workbench-sdk/`（本机 `AppData/Local/Programs/Floatboat` 下没有 resources）；Host 实现在 `app.asar` 里，用 `rg -a` 搜。
 - `pnpm test`（node:test）的汇总行是 `ℹ tests N` / `ℹ fail N`，不是 TAP 的 `# tests`；用 `grep '^# fail'` 过滤会得到空输出，被误读成没跑。先把输出存到 `.workbench/*.log`，看退出码，再 grep `^ℹ`。
 - 多个 agent 同时改同一个工作区时，`build.mjs` 可能读到别人改了一半的文件而报 `No matching export`，doctor 也会报 `dist/ is older than src/`。先确认报错文件是不是自己改的，不是就等对方完成后重跑，不要去改别人的文件。
+- 如果一个 await 只能靠某个定时器结束（超时、看门狗、强杀兜底），这个定时器不能 `unref()`，结束后要 `clearTimeout`。Node 22 的 node:test 发现事件循环只剩 unref 的定时器时，会把挂起的用例判成 `cancelledByParent`（`Promise resolution is still pending but the event loop has already resolved`），同一文件后面的用例也会全部取消。Node 24 上不会出现，所以只有 Node 22 的 CI 任务失败（2026-11-11，PR #15）。只有纯后台定时器（空闲断开、轮询）才 unref。
