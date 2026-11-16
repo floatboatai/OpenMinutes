@@ -18,5 +18,14 @@
   {"eval":"(() => { if (location.hash !== '#/library') throw Error('Import must stay on #/library, got ' + location.hash); return location.hash; })()"},
   {"eval":"(async () => { const r = await fetch('/api/recordings', {headers: {connection: 'close'}}); const body = await r.json(); if (body.data.items.length !== 1 || body.data.items[0].status !== 'ready') throw Error('Unexpected library: ' + JSON.stringify(body.data.items)); return body.data.items.map((item) => ({ id: item.id, filename: item.filename, status: item.status })); })()"},
   {"screenshot":"03-imported.png"},
-  {"aria":"03-imported.aria.txt"}
+  {"aria":"03-imported.aria.txt"},
+  {"click":"text=导入"},
+  {"waitText":"1 个音频文件"},
+  {"click":"text=扫描并导入"},
+  {"waitText":"跳过 1 条"},
+  {"expectText":"同名同大小的录音已存在"},
+  {"eval":"(async () => { const body = await (await fetch('/api/recordings', {headers: {connection: 'close'}})).json(); if (!body.ok || body.data.total !== 1 || body.data.items.length !== 1) throw Error('Duplicate import changed the library: ' + JSON.stringify(body)); return body.data; })()"},
+  {"screenshot":"04-deduplicated.png"},
+  {"aria":"04-deduplicated.aria.txt"},
+  {"click":"text=关闭"}
 ]

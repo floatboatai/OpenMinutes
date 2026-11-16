@@ -30,8 +30,8 @@ Preconditions:
 - **打开详情。** 运行 `browse.mjs <runId> detail '[{"goto":"#/library"},{"waitFor":"button.row__main"},{"click":"button.row__main"},{"waitText":"返回录音"},{"eval":"location.hash"},{"screenshot":"01-open.png"},{"aria":"01-open.aria.txt"}]'`。预期 hash 为 `#/rec/1`，元数据里的「音频文件」指向 `$R\library\2026-10\…`。
 - **音频可加载。** 在同一次调用里追加 `{"eval":"new Promise(r => { const a = document.querySelector('audio'); if (a.readyState >= 1) r(a.duration); else a.addEventListener('loadedmetadata', () => r(a.duration)); })"}`。预期结果为 `6`。
 - **Range 协议。** 运行 `curl -s -D - -o /dev/null -H 'Range: bytes=100-199' "$URL/api/recordings/1/audio" | tee $E/detail/range.txt`。预期看到 `206`、`content-range: bytes 100-199/<size>` 和 `accept-ranges: bytes`。再用 `-H 'Range: bytes=999999-'` 请求一次，预期返回 `416`。
-- **改标题。** 追加 `{"click":"aria=编辑标题"},{"fill":"aria=录音标题","value":"产品评审"},{"press":"Enter"},{"waitText":"标题已更新"},{"expectText":"产品评审"},{"screenshot":"02-title.png"}`。读回验证：`curl -s "$URL/api/recordings/1"` 返回的 `title` 应为「产品评审」。
-- **重要度与标签。** 追加 `{"click":"aria=重要度 4"},{"waitText":"重要度设为 4"},{"fill":"aria=添加标签","value":"周会"},{"press":"Enter"},{"waitText":"已添加标签「周会」"},{"screenshot":"03-fields.png"}`。读回验证：`importance` 为 4，`tags` 包含「周会」。
+- **改标题。** 追加 `{"click":"aria=编辑标题"},{"fill":"aria=录音标题","value":"产品评审"},{"press":"Enter"},{"waitText":"标题已更新"},{"expectText":"产品评审"},{"screenshot":"02-title.png"}`。读回验证：`curl -s "$URL/api/recordings/1"` 返回的 `data.recording.title` 应为「产品评审」。
+- **重要度与标签。** 追加 `{"click":"aria=重要度 4"},{"waitText":"重要度设为 4"},{"fill":"aria=添加标签","value":"周会"},{"press":"Enter"},{"waitText":"已添加标签「周会」"},{"screenshot":"03-fields.png"}`。读回验证：`data.recording.importance` 为 4，`data.recording.tags` 中有 `name` 为「周会」的对象。
 - **导出。** 收件目录里还留着同名的原文件，直接 `ls` 无法区分是不是导出的。所以先运行 `rm $R/inbox/REC20261029_101500.mp3`，再追加 `{"click":"text=导出"},{"waitText":"已导出到本机目录"}`。然后运行 `ls $R/inbox/ | tee $E/detail/export.txt`，被删掉的文件应该重新出现。
 - **删除。** 追加 `{"click":"details.moremenu > summary"},{"click":"text=删除"},{"waitText":"录音已删除"}`（先展开「更多」）。`steps.log` 里应记录 `dialog confirm: 音频文件会移到数据目录的回收站，确认删除这条录音？ -> accepted`。之后 `curl -s "$URL/api/recordings"` 的 `total` 减 1。
 

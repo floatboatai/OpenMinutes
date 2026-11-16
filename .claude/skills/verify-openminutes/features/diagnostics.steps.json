@@ -4,6 +4,8 @@
   {"waitText":"最近设备操作"},
   {"expectText":"本机环境"},
   {"expectText":"运行时路径"},
+  {"expectText":"转录任务"},
+  {"expectText":"复制诊断报告"},
   {"expectText":"传输方式"},
   {"expectText":"无线快传阈值"},
   {"expectText":"宿主能力"},
@@ -21,5 +23,7 @@
   {"aria":"02-saved.aria.txt"},
   {"select":"aria=传输方式","value":"auto"},
   {"click":"text=保存设置"},
-  {"waitText":"设置已保存"}
+  {"waitText":"设置已保存"},
+  {"waitNoText":"有未保存的修改"},
+  {"eval":"(async () => { const body = await (await fetch('/api/settings', {headers: {connection: 'close'}})).json(); const value = body.data.find((item) => item.key === 'device_transport')?.value; if (value !== 'auto') throw Error('device_transport not restored: ' + value); return value; })()"}
 ]

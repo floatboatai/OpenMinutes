@@ -19,7 +19,7 @@
 
 Preconditions:
 
-- 满足基线条件。录音不是必需的。
+- 满足基线条件。分类增删改查不需要录音；详情引用和删除后的录音归属需要先导入测试录音。
 
 - **列表与内置项。** 运行 `browse.mjs <runId> cat '[{"goto":"#/categories"},{"waitText":"全部分类"},{"waitFor":"aria=会议纪要 的名称"},{"expectText":"内置"},{"screenshot":"01-list.png"},{"aria":"01-list.aria.txt"}]'`。
 - **新建。** 在同一次调用里追加 `{"fill":"input[placeholder=\"例如：产品评审\"]","value":"验证分类"},{"fill":"input[placeholder=\"这类录音通常在什么场景下产生\"]","value":"verify run"},{"click":"text=创建分类"},{"waitText":"分类已创建"},{"waitFor":"aria=验证分类 的名称"},{"screenshot":"02-created.png"}`。读回验证：`curl -s "$URL/api/categories" | tee $E/cat/after-create.json` 中应包含「验证分类」，并且 `isSystem` 为 false。
@@ -33,5 +33,5 @@ Preconditions:
 - 分类名显示在就地改名的 `<input>` 里，不属于可见文本，所以 `expectText:"会议纪要"` 会失败。要用 `waitFor:"aria=会议纪要 的名称"`。
 - 新增表单的输入框没有 aria-label，只能用 placeholder 作为 CSS 选择器来定位。
 - 改名在失焦（blur）时才保存。必须 `press Tab` 或点击别处，单纯 fill 不会触发保存。
-- 列表里每一行都有「删除」按钮。`text=删除` 会命中第一个可见的那个，可能删错分类，所以要像上面那样先定位到行，再点该行的按钮。
-- 名称输入框的 aria-label 是用加载时的名称生成的。改名后，要等页面刷新（toast 出现后重新 `goto`），新的 aria-label 才会生效。
+- 只有自定义分类行有「删除」按钮，内置行显示「内置」。`text=删除` 会命中第一个可见的按钮，可能删错分类，所以要先定位到行，再点该行的按钮。
+- 保存改名后页面会自动重新加载列表。等待新名称对应的 aria-label，例如 `waitFor:"aria=验证分类2 的名称"`，再继续操作；toast 出现不代表列表已经更新，无需重新 `goto`。
